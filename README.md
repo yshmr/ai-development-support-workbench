@@ -22,6 +22,27 @@ OPENAI_MODEL=gpt-5.5
 
 `OPENAI_API_KEY` が未設定の場合は、Zodスキーマを通るモック出力で動作します。キーを設定した場合は OpenAI Responses API にJSON Schema付きの構造化出力を依頼します。
 
+`.env.local` は `.gitignore` の `.env*.local` によりGit管理対象外です。APIキーの値は `.env.example`、README、docs、生成履歴、コミットに含めないでください。
+
+## 実LLM出力の生成手順
+
+mock-local出力と実LLM出力を比較する場合は、以下の手順で同じサンプル入力を使って生成します。
+
+1. `.env.example` を参考に `.env.local` を作成する。
+2. `.env.local` に `OPENAI_API_KEY` と必要に応じて `OPENAI_MODEL` を設定する。
+3. `npm run dev` でアプリを起動する。
+4. 画面でREADMEのサンプル入力を送信する。
+5. 生成結果が履歴に保存されたことを確認する。
+6. `docs/llm_app_poc/evaluation_results.md` のBefore/After比較欄に、実LLM出力の履歴ID、modelName、評価点、差分を記録する。
+
+注意:
+
+- `OPENAI_API_KEY` の値はファイルに書き残さない。
+- `.env.local` はコミットしない。
+- `data/generations.json` はローカル履歴として扱い、コミットしない。
+- 公開用のサンプル履歴が必要な場合は `data/sample-generations.json` に作成する。
+- ポートフォリオに載せる前に、生成履歴に個人情報、顧客情報、業務上の機密が含まれていないことを確認する。
+
 ## 主な機能
 
 - 要件メモ入力フォーム
@@ -31,6 +52,18 @@ OPENAI_MODEL=gpt-5.5
 - `data/generations.json` へのローカル履歴保存
 - `GET /api/generations` と `GET /api/generations/:id` による履歴参照
 - 生成結果と履歴詳細の画面表示
+
+## 履歴データの扱い
+
+`data/generations.json` はローカル操作で生成される履歴ファイルです。APIキー利用時の実LLM出力や検証中の入力が含まれる可能性があるため、Git管理しない方針です。
+
+公開・共有・ポートフォリオ掲載に使うサンプル履歴が必要な場合は、機密情報を含まない内容だけを `data/sample-generations.json` に手動で作成します。
+
+方針:
+
+- `data/generations.json`: ローカル履歴。`.gitignore` 対象。コミットしない。
+- `data/sample-generations.json`: 公開可能なサンプル履歴。機密情報を含めない。
+- 実LLMの生成履歴をdocsへ転記する場合は、個人情報、顧客情報、APIキー、業務上の機密が含まれていないことを確認する。
 
 ## サンプル入力
 
