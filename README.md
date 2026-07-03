@@ -76,6 +76,13 @@ npm run test:e2e
 - 生成結果が期待する型に合っている
 - 画面から入力して結果表示まで確認できる
 
+## 評価資料
+
+- [LLMアプリ開発PoC 評価設計](docs/llm_app_poc/llm_app_poc_evaluation_v0_1.md)
+- [LLMアプリ開発PoC 評価結果](docs/llm_app_poc/evaluation_results.md)
+- [LLMアプリ開発PoC ポートフォリオ要約](docs/llm_app_poc/portfolio_summary.md)
+- [追加サンプル入力案](docs/llm_app_poc/sample_inputs.md)
+
 ## 今後の拡張予定
 
 - SQLite + Prisma への履歴保存差し替え
