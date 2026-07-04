@@ -9,7 +9,10 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "check:gemini": "node scripts/check-gemini.mjs",
+    "check:gemini-provider": "node scripts/check-gemini-provider.mjs",
+    "check:openai-provider": "node scripts/check-openai-provider.mjs"
   },
   "dependencies": {
     "next": "^15.4.0",

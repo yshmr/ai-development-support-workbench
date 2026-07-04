@@ -11,6 +11,7 @@ const sampleInput = `ユーザーがプロフィール画像を変更できる�
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 describe("generation schema", () => {
@@ -45,6 +46,274 @@ describe("generation service", () => {
     await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
       "LLM_PROVIDER=gemini の場合は GEMINI_API_KEY を .env.local に設定してください。"
     );
+  });
+
+  it("uses OpenAI when selected even if Gemini settings are also present", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openai");
+    vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
+    vi.stubEnv("OPENAI_MODEL", "test-openai-model");
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("GEMINI_MODEL", "test-gemini-model");
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        output_text: JSON.stringify(createMockGeneration(sampleInput))
+      })
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await generateFromRequirementMemo(sampleInput);
+    const [requestUrl, requestInit] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit
+    ];
+
+    expect(result.provider).toBe("openai");
+    expect(result.modelName).toBe("test-openai-model");
+    expect(requestUrl).toBe("https://api.openai.com/v1/responses");
+    expect(requestInit.headers).toMatchObject({
+      "Content-Type": "application/json",
+      Authorization: "Bearer test-openai-key"
+    });
+    expect(JSON.parse(String(requestInit.body))).toMatchObject({
+      model: "test-openai-model"
+    });
+    expect(String(requestInit.body)).not.toContain("test-gemini-key");
+  });
+
+  it("parses Gemini response.text", async () => {
+    vi.stubEnv("LLM_PROVIDER", "gemini");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        text: JSON.stringify(createMockGeneration(sampleInput))
+      })
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await generateFromRequirementMemo(sampleInput);
+    const [requestUrl, requestInit] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit
+    ];
+
+    expect(requestUrl).toBe(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    );
+    expect(String(requestUrl)).not.toContain("test-key");
+    expect(requestInit).toMatchObject({
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": "test-key"
+      }
+    });
+    expect(String(requestInit?.body)).not.toContain("test-key");
+    expect(result.provider).toBe("gemini");
+    expect(result.modelName).toBe("gemini-2.5-flash");
+    expect(() => generationOutputSchema.parse(result.output)).not.toThrow();
+  });
+
+  it("logs safe Gemini request metadata when DEBUG_LLM_RESPONSE is enabled", async () => {
+    const consoleSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.stubEnv("LLM_PROVIDER", "gemini");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubEnv("DEBUG_LLM_RESPONSE", "1");
+    vi.stubEnv("HTTPS_PROXY", "http://proxy.example");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          text: JSON.stringify(createMockGeneration(sampleInput))
+        })
+      }))
+    );
+
+    await generateFromRequirementMemo(sampleInput);
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[llm-debug] Gemini request metadata",
+      expect.objectContaining({
+        provider: "gemini",
+        modelName: "gemini-2.5-flash",
+        urlOrigin: "https://generativelanguage.googleapis.com",
+        urlPathname:
+          "/v1beta/models/gemini-2.5-flash:generateContent",
+        method: "POST",
+        hasHttpsProxy: true
+      })
+    );
+
+    const loggedRequest = consoleSpy.mock.calls.find(
+      ([label]) => label === "[llm-debug] Gemini request metadata"
+    )?.[1];
+
+    expect(JSON.stringify(loggedRequest)).not.toContain("test-key");
+    expect(JSON.stringify(loggedRequest)).not.toContain(sampleInput);
+    consoleSpy.mockRestore();
+  });
+
+  it("parses Gemini candidates content parts text", async () => {
+    vi.stubEnv("LLM_PROVIDER", "gemini");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify(createMockGeneration(sampleInput))
+                  }
+                ]
+              },
+              finishReason: "STOP"
+            }
+          ]
+        })
+      }))
+    );
+
+    const result = await generateFromRequirementMemo(sampleInput);
+
+    expect(result.provider).toBe("gemini");
+    expect(() => generationOutputSchema.parse(result.output)).not.toThrow();
+  });
+
+  it("returns a clear Gemini error when candidates are empty", async () => {
+    vi.stubEnv("LLM_PROVIDER", "gemini");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          candidates: [],
+          promptFeedback: {
+            blockReason: "SAFETY"
+          }
+        })
+      }))
+    );
+
+    await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
+      /candidatesLength=0/
+    );
+    await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
+      /promptFeedback=.*SAFETY/
+    );
+  });
+
+  it("returns a clear Gemini error when parts contain no text", async () => {
+    vi.stubEnv("LLM_PROVIDER", "gemini");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType: "application/octet-stream"
+                    }
+                  }
+                ]
+              },
+              finishReason: "SAFETY",
+              safetyRatings: [
+                {
+                  category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+                  probability: "LOW"
+                }
+              ]
+            }
+          ]
+        })
+      }))
+    );
+
+    await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
+      /finishReason=SAFETY/
+    );
+    await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
+      /partTypes=inlineData/
+    );
+  });
+
+  it("returns safe Gemini fetch diagnostics when fetch fails", async () => {
+    vi.stubEnv("LLM_PROVIDER", "gemini");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed", {
+          cause: {
+            code: "ENOTFOUND",
+            errno: -3008,
+            syscall: "getaddrinfo",
+            hostname: "generativelanguage.googleapis.com"
+          }
+        });
+      })
+    );
+
+    await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
+      /Gemini API fetch failed/
+    );
+    await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
+      /provider=gemini/
+    );
+    await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
+      /cause.code=ENOTFOUND/
+    );
+    await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
+      /cause.hostname=generativelanguage.googleapis.com/
+    );
+  });
+
+  it("logs safe Gemini fetch diagnostics only when DEBUG_LLM_RESPONSE is enabled", async () => {
+    const consoleSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.stubEnv("LLM_PROVIDER", "gemini");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubEnv("DEBUG_LLM_RESPONSE", "1");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed", {
+          cause: {
+            code: "ECONNRESET",
+            errno: -4077,
+            syscall: "read",
+            hostname: "generativelanguage.googleapis.com"
+          }
+        });
+      })
+    );
+
+    await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
+      /cause.code=ECONNRESET/
+    );
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[llm-debug] Gemini fetch error",
+      expect.objectContaining({
+        provider: "gemini",
+        modelName: "gemini-2.5-flash",
+        causeCode: "ECONNRESET",
+        causeHostname: "generativelanguage.googleapis.com"
+      })
+    );
+
+    consoleSpy.mockRestore();
   });
 });
 
