@@ -48,6 +48,15 @@ describe("generation service", () => {
     );
   });
 
+  it("returns a clear error when Anthropic is selected without ANTHROPIC_API_KEY", async () => {
+    vi.stubEnv("LLM_PROVIDER", "anthropic");
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+
+    await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
+      "LLM_PROVIDER=anthropic の場合は ANTHROPIC_API_KEY を .env.local に設定してください。"
+    );
+  });
+
   it("uses OpenAI when selected even if Gemini settings are also present", async () => {
     vi.stubEnv("LLM_PROVIDER", "openai");
     vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
@@ -113,6 +122,238 @@ describe("generation service", () => {
     expect(result.provider).toBe("gemini");
     expect(result.modelName).toBe("gemini-2.5-flash");
     expect(() => generationOutputSchema.parse(result.output)).not.toThrow();
+  });
+
+  it("uses Anthropic when selected and parses Claude text content blocks", async () => {
+    vi.stubEnv("LLM_PROVIDER", "anthropic");
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-anthropic-key");
+    vi.stubEnv("ANTHROPIC_MODEL", "test-anthropic-model");
+    vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(createMockGeneration(sampleInput))
+          }
+        ],
+        stop_reason: "end_turn",
+        usage: {
+          input_tokens: 10,
+          output_tokens: 20
+        }
+      })
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await generateFromRequirementMemo(sampleInput);
+    const [requestUrl, requestInit] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit
+    ];
+    const body = JSON.parse(String(requestInit.body));
+
+    expect(result.provider).toBe("anthropic");
+    expect(result.modelName).toBe("test-anthropic-model");
+    expect(requestUrl).toBe("https://api.anthropic.com/v1/messages");
+    expect(requestInit.headers).toMatchObject({
+      "Content-Type": "application/json",
+      "x-api-key": "test-anthropic-key",
+      "anthropic-version": "2023-06-01"
+    });
+    expect(body).toMatchObject({
+      model: "test-anthropic-model",
+      output_config: {
+        format: {
+          type: "json_schema"
+        }
+      }
+    });
+    expect(String(requestInit.body)).not.toContain("test-anthropic-key");
+    expect(String(requestInit.body)).not.toContain("test-openai-key");
+    expect(String(requestInit.body)).not.toContain("test-gemini-key");
+    expect(() => generationOutputSchema.parse(result.output)).not.toThrow();
+  });
+
+  it("logs safe Anthropic response metadata when DEBUG_LLM_RESPONSE is enabled", async () => {
+    const consoleSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.stubEnv("LLM_PROVIDER", "anthropic");
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-anthropic-key");
+    vi.stubEnv("DEBUG_LLM_RESPONSE", "1");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(createMockGeneration(sampleInput))
+            }
+          ],
+          stop_reason: "end_turn",
+          usage: {
+            input_tokens: 12,
+            output_tokens: 34
+          }
+        })
+      }))
+    );
+
+    await generateFromRequirementMemo(sampleInput);
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[llm-debug] Anthropic response metadata",
+      expect.objectContaining({
+        provider: "anthropic",
+        modelName: "claude-haiku-4-5-20251001",
+        httpStatus: 200,
+        stopReason: "end_turn",
+        contentBlockTypes: ["text"],
+        usage: {
+          inputTokens: 12,
+          outputTokens: 34
+        }
+      })
+    );
+
+    const loggedResponse = consoleSpy.mock.calls.find(
+      ([label]) => label === "[llm-debug] Anthropic response metadata"
+    )?.[1];
+
+    expect(JSON.stringify(loggedResponse)).not.toContain("test-anthropic-key");
+    expect(JSON.stringify(loggedResponse)).not.toContain(sampleInput);
+    consoleSpy.mockRestore();
+  });
+
+  it("returns a clear Anthropic error when content is empty", async () => {
+    vi.stubEnv("LLM_PROVIDER", "anthropic");
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-anthropic-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          content: [],
+          stop_reason: "end_turn"
+        })
+      }))
+    );
+
+    await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
+      /Anthropic response content was empty/
+    );
+  });
+
+  it("returns a clear Anthropic error when text blocks are missing", async () => {
+    vi.stubEnv("LLM_PROVIDER", "anthropic");
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-anthropic-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          content: [
+            {
+              type: "tool_use"
+            }
+          ],
+          stop_reason: "tool_use"
+        })
+      }))
+    );
+
+    await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
+      /Anthropic response did not include text content/
+    );
+    await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
+      /contentBlockTypes=tool_use/
+    );
+  });
+
+  it("returns a clear Anthropic error when JSON parsing fails", async () => {
+    vi.stubEnv("LLM_PROVIDER", "anthropic");
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-anthropic-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          content: [
+            {
+              type: "text",
+              text: "{invalid json"
+            }
+          ]
+        })
+      }))
+    );
+
+    await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
+      /Anthropic response JSON parse failed/
+    );
+  });
+
+  it("returns a clear Anthropic error when Zod validation fails", async () => {
+    vi.stubEnv("LLM_PROVIDER", "anthropic");
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-anthropic-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                summary: "missing required arrays"
+              })
+            }
+          ]
+        })
+      }))
+    );
+
+    await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
+      /Anthropic response schema validation failed/
+    );
+  });
+
+  it("returns a clear Anthropic HTTP error with safe metadata", async () => {
+    vi.stubEnv("LLM_PROVIDER", "anthropic");
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-anthropic-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 429,
+        json: async () => ({
+          type: "error",
+          error: {
+            type: "rate_limit_error",
+            message: "Too many requests"
+          }
+        })
+      }))
+    );
+
+    await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
+      /status=429/
+    );
+    await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
+      /category=rate limit/
+    );
+    await expect(generateFromRequirementMemo(sampleInput)).rejects.toThrow(
+      /errorType=rate_limit_error/
+    );
   });
 
   it("logs safe Gemini request metadata when DEBUG_LLM_RESPONSE is enabled", async () => {

@@ -1,4 +1,5 @@
 import {
+  anthropicGenerationOutputSchema,
   geminiGenerationOutputSchema,
   generationOutputJsonSchema,
   generationOutputSchema,
@@ -11,6 +12,8 @@ import { createMockGeneration } from "./mock-generator";
 
 const PROMPT_VERSION = "llm-app-poc-v1";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_VERSION = "2023-06-01";
 
 type GenerationResult = {
   output: GenerationOutput;
@@ -47,6 +50,41 @@ type GeminiResponse = {
     safetyRatings?: unknown[];
   }>;
   promptFeedback?: unknown;
+};
+
+type AnthropicContentBlock = {
+  type?: string;
+  text?: string;
+};
+
+type AnthropicResponse = {
+  content?: AnthropicContentBlock[];
+  stop_reason?: string;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+  };
+};
+
+type AnthropicErrorResponse = {
+  type?: string;
+  error?: {
+    type?: string;
+    message?: string;
+  };
+};
+
+type AnthropicDebugInfo = {
+  provider: "anthropic";
+  modelName: string;
+  httpStatus?: number;
+  errorType?: string;
+  stopReason?: string;
+  contentBlockTypes?: string[];
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+  };
 };
 
 type GeminiPart = NonNullable<
@@ -117,6 +155,14 @@ function logGeminiDebugInfo(info: GeminiDebugInfo) {
   }
 
   console.info("[llm-debug] Gemini response metadata", info);
+}
+
+function logAnthropicDebugInfo(label: string, info: AnthropicDebugInfo) {
+  if (process.env.DEBUG_LLM_RESPONSE !== "1") {
+    return;
+  }
+
+  console.info(label, info);
 }
 
 export async function runGeminiProviderDiagnostic(inputText = "Ping"): Promise<{
@@ -224,13 +270,118 @@ function extractOpenAiText(data: OpenAiResponse): string {
   return text;
 }
 
+function collectAnthropicDebugInfo(
+  data: AnthropicResponse,
+  modelName: string,
+  httpStatus?: number
+): AnthropicDebugInfo {
+  return {
+    provider: "anthropic",
+    modelName,
+    httpStatus,
+    stopReason: data.stop_reason,
+    contentBlockTypes: data.content?.map((block) => block.type ?? "unknown") ?? [],
+    usage: {
+      inputTokens: data.usage?.input_tokens,
+      outputTokens: data.usage?.output_tokens
+    }
+  };
+}
+
+function extractAnthropicText(
+  data: AnthropicResponse,
+  modelName: string,
+  httpStatus?: number
+): string {
+  const debugInfo = collectAnthropicDebugInfo(data, modelName, httpStatus);
+  logAnthropicDebugInfo("[llm-debug] Anthropic response metadata", debugInfo);
+
+  if (!data.content || data.content.length === 0) {
+    throw new Error(
+      `Anthropic response content was empty. modelName=${modelName} stopReason=${data.stop_reason ?? "none"}`
+    );
+  }
+
+  const text = data.content
+    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("");
+
+  if (!text.trim()) {
+    const blockTypes = data.content.map((block) => block.type ?? "unknown").join(",");
+    throw new Error(
+      `Anthropic response did not include text content. modelName=${modelName} stopReason=${data.stop_reason ?? "none"} contentBlockTypes=${blockTypes || "none"}`
+    );
+  }
+
+  return text;
+}
+
+function parseAnthropicJson(rawText: string): unknown {
+  try {
+    return JSON.parse(rawText);
+  } catch (error) {
+    throw new Error(
+      `Anthropic response JSON parse failed: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+function validateAnthropicOutput(parsed: unknown): GenerationOutput {
+  const result = generationOutputSchema.safeParse(parsed);
+
+  if (!result.success) {
+    throw new Error(
+      `Anthropic response schema validation failed: ${JSON.stringify(result.error.issues)}`
+    );
+  }
+
+  return result.data;
+}
+
+function getAnthropicErrorType(data: AnthropicErrorResponse): string | undefined {
+  return data.error?.type ?? data.type;
+}
+
+function getAnthropicErrorMessage(data: AnthropicErrorResponse): string | undefined {
+  return data.error?.message;
+}
+
+function classifyAnthropicHttpError(status: number, errorType?: string): string {
+  if (status === 429 || errorType === "rate_limit_error") {
+    return "rate limit";
+  }
+
+  if (
+    status === 402 ||
+    errorType === "billing_error" ||
+    errorType === "credit_balance_too_low"
+  ) {
+    return "quota or billing";
+  }
+
+  if (status === 404 || errorType === "not_found_error") {
+    return "model or endpoint not found";
+  }
+
+  if (status >= 400 && status < 500) {
+    return "client error";
+  }
+
+  if (status >= 500) {
+    return "server error";
+  }
+
+  return "HTTP error";
+}
+
 function resolveProvider(): LlmProvider {
   const rawProvider = process.env.LLM_PROVIDER ?? "mock";
   const parsedProvider = llmProviderSchema.safeParse(rawProvider);
 
   if (!parsedProvider.success) {
     throw new Error(
-      "LLM_PROVIDER は mock、openai、gemini のいずれかを指定してください。"
+      "LLM_PROVIDER は mock、openai、gemini、anthropic のいずれかを指定してください。"
     );
   }
 
@@ -344,6 +495,99 @@ async function generateWithGemini(inputText: string): Promise<GenerationResult> 
   };
 }
 
+async function generateWithAnthropic(inputText: string): Promise<GenerationResult> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const modelName =
+    process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5-20251001";
+
+  if (!apiKey) {
+    throw new Error(
+      "LLM_PROVIDER=anthropic の場合は ANTHROPIC_API_KEY を .env.local に設定してください。"
+    );
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetch(ANTHROPIC_MESSAGES_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": ANTHROPIC_VERSION
+      },
+      body: JSON.stringify({
+        model: modelName,
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: [
+          {
+            role: "user",
+            content: inputText
+          }
+        ],
+        output_config: {
+          format: {
+            type: "json_schema",
+            schema: anthropicGenerationOutputSchema
+          }
+        }
+      })
+    });
+  } catch (error) {
+    const errorName = error instanceof Error ? error.name : typeof error;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logAnthropicDebugInfo("[llm-debug] Anthropic fetch error", {
+      provider: "anthropic",
+      modelName,
+      errorType: errorName
+    });
+    throw new Error(
+      `Anthropic API fetch failed. provider=anthropic modelName=${modelName} error.name=${errorName} error.message=${errorMessage}`
+    );
+  }
+
+  if (!response.ok) {
+    let errorData: AnthropicErrorResponse = {};
+
+    try {
+      errorData = (await response.json()) as AnthropicErrorResponse;
+    } catch {
+      errorData = {};
+    }
+
+    const errorType = getAnthropicErrorType(errorData);
+    const category = classifyAnthropicHttpError(response.status, errorType);
+    logAnthropicDebugInfo("[llm-debug] Anthropic API error", {
+      provider: "anthropic",
+      modelName,
+      httpStatus: response.status,
+      errorType
+    });
+
+    throw new Error(
+      [
+        "Anthropic API request failed.",
+        `status=${response.status}`,
+        `category=${category}`,
+        `errorType=${errorType ?? "none"}`,
+        `message=${getAnthropicErrorMessage(errorData) ?? "none"}`
+      ].join(" ")
+    );
+  }
+
+  const data = (await response.json()) as AnthropicResponse;
+  const rawText = extractAnthropicText(data, modelName, response.status);
+  const parsed = parseAnthropicJson(rawText);
+
+  return {
+    output: validateAnthropicOutput(parsed),
+    provider: "anthropic",
+    promptVersion: PROMPT_VERSION,
+    modelName
+  };
+}
+
 export async function generateFromRequirementMemo(
   inputText: string
 ): Promise<GenerationResult> {
@@ -355,6 +599,10 @@ export async function generateFromRequirementMemo(
 
   if (provider === "gemini") {
     return generateWithGemini(inputText);
+  }
+
+  if (provider === "anthropic") {
+    return generateWithAnthropic(inputText);
   }
 
   return generateWithMock(inputText);

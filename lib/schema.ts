@@ -13,7 +13,7 @@ export const jiraTaskSchema = z.object({
   type: jiraTaskTypeSchema
 });
 
-export const llmProviderSchema = z.enum(["mock", "openai", "gemini"]);
+export const llmProviderSchema = z.enum(["mock", "openai", "gemini", "anthropic"]);
 
 export const generationOutputSchema = z.object({
   summary: z.string().min(1),
@@ -137,6 +137,61 @@ export const geminiGenerationOutputSchema = {
       type: "array",
       items: {
         type: "object",
+        required: ["title", "description", "type"],
+        properties: {
+          title: { type: "string" },
+          description: { type: "string" },
+          type: {
+            type: "string",
+            enum: ["frontend", "backend", "test", "documentation"]
+          }
+        }
+      }
+    },
+    implementationPlan: {
+      type: "array",
+      items: { type: "string" }
+    },
+    reviewPoints: {
+      type: "array",
+      items: { type: "string" }
+    },
+    risks: {
+      type: "array",
+      items: { type: "string" }
+    }
+  }
+} as const;
+
+export const anthropicGenerationOutputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "summary",
+    "spec",
+    "acceptanceCriteria",
+    "jiraTasks",
+    "implementationPlan",
+    "reviewPoints",
+    "risks"
+  ],
+  properties: {
+    summary: {
+      type: "string"
+    },
+    spec: {
+      type: "array",
+      items: { type: "string" }
+    },
+    acceptanceCriteria: {
+      type: "array",
+      items: { type: "string" }
+    },
+    jiraTasks: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
         required: ["title", "description", "type"],
         properties: {
           title: { type: "string" },
