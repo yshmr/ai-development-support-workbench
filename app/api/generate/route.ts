@@ -28,7 +28,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { output, promptVersion, modelName } = await generateFromRequirementMemo(
+    const { output, provider, promptVersion, modelName } = await generateFromRequirementMemo(
       parsedRequest.data.inputText
     );
 
@@ -36,6 +36,7 @@ export async function POST(request: Request) {
       id: randomUUID(),
       inputText: parsedRequest.data.inputText,
       output,
+      provider,
       promptVersion,
       modelName,
       createdAt: new Date().toISOString()
@@ -44,6 +45,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ...output,
       id: record.id,
+      provider: record.provider,
       promptVersion: record.promptVersion,
       modelName: record.modelName,
       createdAt: record.createdAt

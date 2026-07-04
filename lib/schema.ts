@@ -13,6 +13,8 @@ export const jiraTaskSchema = z.object({
   type: jiraTaskTypeSchema
 });
 
+export const llmProviderSchema = z.enum(["mock", "openai", "gemini"]);
+
 export const generationOutputSchema = z.object({
   summary: z.string().min(1),
   spec: z.array(z.string().min(1)).min(1),
@@ -27,6 +29,7 @@ export const generationRecordSchema = z.object({
   id: z.string().min(1),
   inputText: z.string().min(1),
   output: generationOutputSchema,
+  provider: llmProviderSchema.default("mock"),
   promptVersion: z.string().min(1),
   modelName: z.string().min(1),
   createdAt: z.string().datetime()
@@ -40,6 +43,7 @@ export const generationHistorySchema = z.array(generationRecordSchema);
 
 export type JiraTaskType = z.infer<typeof jiraTaskTypeSchema>;
 export type JiraTask = z.infer<typeof jiraTaskSchema>;
+export type LlmProvider = z.infer<typeof llmProviderSchema>;
 export type GenerationOutput = z.infer<typeof generationOutputSchema>;
 export type GenerationRecord = z.infer<typeof generationRecordSchema>;
 export type GenerateRequest = z.infer<typeof generateRequestSchema>;

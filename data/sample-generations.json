@@ -52,6 +52,7 @@
         "不正な画像ファイルや過大なアップロードによる負荷対策が必要になる。"
       ]
     },
+    "provider": "mock",
     "promptVersion": "sample-public-v1",
     "modelName": "sample-public",
     "createdAt": "2026-07-03T00:00:00.000Z"

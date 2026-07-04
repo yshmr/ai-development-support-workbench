@@ -5,6 +5,7 @@ import type { GenerationOutput, GenerationRecord, JiraTaskType } from "@/lib/sch
 
 type GeneratedResponse = GenerationOutput & {
   id: string;
+  provider: GenerationRecord["provider"];
   promptVersion: string;
   modelName: string;
   createdAt: string;
@@ -40,7 +41,10 @@ function ResultView({
   meta
 }: {
   output: GenerationOutput;
-  meta?: Pick<GenerationRecord, "modelName" | "promptVersion" | "createdAt">;
+  meta?: Pick<
+    GenerationRecord,
+    "provider" | "modelName" | "promptVersion" | "createdAt"
+  >;
 }) {
   return (
     <div className="result-grid">
@@ -52,6 +56,10 @@ function ResultView({
         <p>{output.summary}</p>
         {meta ? (
           <dl className="meta-list">
+            <div>
+              <dt>Provider</dt>
+              <dd>{meta.provider}</dd>
+            </div>
             <div>
               <dt>Model</dt>
               <dd>{meta.modelName}</dd>
@@ -173,12 +181,14 @@ export default function Home() {
   const activeOutput = selectedHistory?.output ?? result;
   const activeMeta = selectedHistory
     ? {
+        provider: selectedHistory.provider,
         modelName: selectedHistory.modelName,
         promptVersion: selectedHistory.promptVersion,
         createdAt: selectedHistory.createdAt
       }
     : result
       ? {
+          provider: result.provider,
           modelName: result.modelName,
           promptVersion: result.promptVersion,
           createdAt: result.createdAt
