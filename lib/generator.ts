@@ -20,6 +20,18 @@ type GenerationResult = {
   provider: LlmProvider;
   promptVersion: string;
   modelName: string;
+  providerLatencyMs: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+};
+
+type ProviderGenerationResult = Omit<GenerationResult, "providerLatencyMs">;
+
+type TokenUsage = {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
 };
 
 type OpenAiResponse = {
@@ -30,6 +42,11 @@ type OpenAiResponse = {
       text?: string;
     }>;
   }>;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    total_tokens?: number;
+  };
 };
 
 type GeminiResponse = {
@@ -50,6 +67,11 @@ type GeminiResponse = {
     safetyRatings?: unknown[];
   }>;
   promptFeedback?: unknown;
+  usageMetadata?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    totalTokenCount?: number;
+  };
 };
 
 type AnthropicContentBlock = {
@@ -86,6 +108,68 @@ type AnthropicDebugInfo = {
     outputTokens?: number;
   };
 };
+
+function getTimerNow(): number {
+  try {
+    return globalThis.performance?.now?.() ?? Date.now();
+  } catch {
+    return Date.now();
+  }
+}
+
+function toNonNegativeDurationMs(startMs: number, endMs = getTimerNow()): number {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.round(endMs - startMs));
+}
+
+function getOptionalNonNegativeNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+function normalizeTokenUsage(usage: TokenUsage): TokenUsage {
+  const inputTokens = getOptionalNonNegativeNumber(usage.inputTokens);
+  const outputTokens = getOptionalNonNegativeNumber(usage.outputTokens);
+  const providedTotalTokens = getOptionalNonNegativeNumber(usage.totalTokens);
+  const totalTokens =
+    providedTotalTokens ??
+    (inputTokens !== undefined && outputTokens !== undefined
+      ? inputTokens + outputTokens
+      : undefined);
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens
+  };
+}
+
+function extractOpenAiTokenUsage(data: OpenAiResponse): TokenUsage {
+  return normalizeTokenUsage({
+    inputTokens: data.usage?.input_tokens,
+    outputTokens: data.usage?.output_tokens,
+    totalTokens: data.usage?.total_tokens
+  });
+}
+
+function extractGeminiTokenUsage(data: GeminiResponse): TokenUsage {
+  return normalizeTokenUsage({
+    inputTokens: data.usageMetadata?.promptTokenCount,
+    outputTokens: data.usageMetadata?.candidatesTokenCount,
+    totalTokens: data.usageMetadata?.totalTokenCount
+  });
+}
+
+function extractAnthropicTokenUsage(data: AnthropicResponse): TokenUsage {
+  return normalizeTokenUsage({
+    inputTokens: data.usage?.input_tokens,
+    outputTokens: data.usage?.output_tokens
+  });
+}
 
 type GeminiPart = NonNullable<
   NonNullable<
@@ -392,7 +476,7 @@ export function getPromptVersion() {
   return PROMPT_VERSION;
 }
 
-async function generateWithMock(inputText: string): Promise<GenerationResult> {
+async function generateWithMock(inputText: string): Promise<ProviderGenerationResult> {
   const output = generationOutputSchema.parse(createMockGeneration(inputText));
 
   return {
@@ -403,7 +487,7 @@ async function generateWithMock(inputText: string): Promise<GenerationResult> {
   };
 }
 
-async function generateWithOpenAi(inputText: string): Promise<GenerationResult> {
+async function generateWithOpenAi(inputText: string): Promise<ProviderGenerationResult> {
   const apiKey = process.env.OPENAI_API_KEY;
   const modelName = process.env.OPENAI_MODEL ?? "gpt-5.5";
 
@@ -455,11 +539,12 @@ async function generateWithOpenAi(inputText: string): Promise<GenerationResult> 
     output: generationOutputSchema.parse(parsed),
     provider: "openai",
     promptVersion: PROMPT_VERSION,
-    modelName
+    modelName,
+    ...extractOpenAiTokenUsage(data)
   };
 }
 
-async function generateWithGemini(inputText: string): Promise<GenerationResult> {
+async function generateWithGemini(inputText: string): Promise<ProviderGenerationResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   const modelName = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
 
@@ -491,11 +576,12 @@ async function generateWithGemini(inputText: string): Promise<GenerationResult> 
     output: generationOutputSchema.parse(parsed),
     provider: "gemini",
     promptVersion: PROMPT_VERSION,
-    modelName
+    modelName,
+    ...extractGeminiTokenUsage(data)
   };
 }
 
-async function generateWithAnthropic(inputText: string): Promise<GenerationResult> {
+async function generateWithAnthropic(inputText: string): Promise<ProviderGenerationResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   const modelName =
     process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5-20251001";
@@ -584,7 +670,8 @@ async function generateWithAnthropic(inputText: string): Promise<GenerationResul
     output: validateAnthropicOutput(parsed),
     provider: "anthropic",
     promptVersion: PROMPT_VERSION,
-    modelName
+    modelName,
+    ...extractAnthropicTokenUsage(data)
   };
 }
 
@@ -592,18 +679,21 @@ export async function generateFromRequirementMemo(
   inputText: string
 ): Promise<GenerationResult> {
   const provider = resolveProvider();
+  const providerStartMs = getTimerNow();
+  let result: ProviderGenerationResult;
 
   if (provider === "openai") {
-    return generateWithOpenAi(inputText);
+    result = await generateWithOpenAi(inputText);
+  } else if (provider === "gemini") {
+    result = await generateWithGemini(inputText);
+  } else if (provider === "anthropic") {
+    result = await generateWithAnthropic(inputText);
+  } else {
+    result = await generateWithMock(inputText);
   }
 
-  if (provider === "gemini") {
-    return generateWithGemini(inputText);
-  }
-
-  if (provider === "anthropic") {
-    return generateWithAnthropic(inputText);
-  }
-
-  return generateWithMock(inputText);
+  return {
+    ...result,
+    providerLatencyMs: toNonNegativeDurationMs(providerStartMs)
+  };
 }

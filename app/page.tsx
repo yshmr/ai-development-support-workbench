@@ -9,6 +9,12 @@ type GeneratedResponse = GenerationOutput & {
   promptVersion: string;
   modelName: string;
   createdAt: string;
+  providerLatencyMs?: number;
+  serverProcessingMs?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  clientElapsedMs?: number;
 };
 
 const sampleInput = `ユーザーがプロフィール画像を変更できるようにしたい。
@@ -36,6 +42,22 @@ function ListSection({ title, items }: { title: string; items: string[] }) {
   );
 }
 
+function formatDuration(ms?: number) {
+  if (typeof ms !== "number" || !Number.isFinite(ms)) {
+    return "N/A";
+  }
+
+  return `${(ms / 1000).toFixed(1)} s`;
+}
+
+function formatNumber(value?: number) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "N/A";
+  }
+
+  return value.toLocaleString("ja-JP");
+}
+
 function ResultView({
   output,
   meta
@@ -43,8 +65,18 @@ function ResultView({
   output: GenerationOutput;
   meta?: Pick<
     GenerationRecord,
-    "provider" | "modelName" | "promptVersion" | "createdAt"
-  >;
+    | "provider"
+    | "modelName"
+    | "promptVersion"
+    | "createdAt"
+    | "providerLatencyMs"
+    | "serverProcessingMs"
+    | "inputTokens"
+    | "outputTokens"
+    | "totalTokens"
+  > & {
+    clientElapsedMs?: number;
+  };
 }) {
   return (
     <div className="result-grid">
@@ -71,6 +103,30 @@ function ResultView({
             <div>
               <dt>Created</dt>
               <dd>{new Date(meta.createdAt).toLocaleString("ja-JP")}</dd>
+            </div>
+            <div>
+              <dt>Provider latency</dt>
+              <dd>{formatDuration(meta.providerLatencyMs)}</dd>
+            </div>
+            <div>
+              <dt>Server processing</dt>
+              <dd>{formatDuration(meta.serverProcessingMs)}</dd>
+            </div>
+            <div>
+              <dt>Client elapsed</dt>
+              <dd>{formatDuration(meta.clientElapsedMs)}</dd>
+            </div>
+            <div>
+              <dt>Input tokens</dt>
+              <dd>{formatNumber(meta.inputTokens)}</dd>
+            </div>
+            <div>
+              <dt>Output tokens</dt>
+              <dd>{formatNumber(meta.outputTokens)}</dd>
+            </div>
+            <div>
+              <dt>Total tokens</dt>
+              <dd>{formatNumber(meta.totalTokens)}</dd>
             </div>
           </dl>
         ) : null}
@@ -152,6 +208,7 @@ export default function Home() {
 
     setIsLoading(true);
     setSelectedHistoryId(null);
+    const clientStartedAt = performance.now();
 
     try {
       const response = await fetch("/api/generate", {
@@ -167,7 +224,10 @@ export default function Home() {
         throw new Error(data.error ?? "生成に失敗しました。");
       }
 
-      setResult(data);
+      setResult({
+        ...data,
+        clientElapsedMs: Math.max(0, Math.round(performance.now() - clientStartedAt))
+      });
       await loadHistory();
     } catch (submitError) {
       setError(
@@ -184,14 +244,25 @@ export default function Home() {
         provider: selectedHistory.provider,
         modelName: selectedHistory.modelName,
         promptVersion: selectedHistory.promptVersion,
-        createdAt: selectedHistory.createdAt
+        createdAt: selectedHistory.createdAt,
+        providerLatencyMs: selectedHistory.providerLatencyMs,
+        serverProcessingMs: selectedHistory.serverProcessingMs,
+        inputTokens: selectedHistory.inputTokens,
+        outputTokens: selectedHistory.outputTokens,
+        totalTokens: selectedHistory.totalTokens
       }
     : result
       ? {
           provider: result.provider,
           modelName: result.modelName,
           promptVersion: result.promptVersion,
-          createdAt: result.createdAt
+          createdAt: result.createdAt,
+          providerLatencyMs: result.providerLatencyMs,
+          serverProcessingMs: result.serverProcessingMs,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          totalTokens: result.totalTokens,
+          clientElapsedMs: result.clientElapsedMs
         }
       : undefined;
 

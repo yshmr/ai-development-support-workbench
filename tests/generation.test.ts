@@ -1,8 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { POST } from "@/app/api/generate/route";
 import { generateFromRequirementMemo } from "@/lib/generator";
 import { createMockGeneration } from "@/lib/mock-generator";
-import { generationOutputSchema, generateRequestSchema } from "@/lib/schema";
+import {
+  generationHistorySchema,
+  generationOutputSchema,
+  generateRequestSchema
+} from "@/lib/schema";
 
 const sampleInput = `ユーザーがプロフィール画像を変更できるようにしたい。
 画像は5MBまで、jpg/png対応。
@@ -26,6 +32,23 @@ describe("generation schema", () => {
     expect(output.jiraTasks.map((task) => task.type)).toContain("frontend");
     expect(output.jiraTasks.map((task) => task.type)).toContain("test");
   });
+
+  it("accepts generation history without latency metadata", () => {
+    const output = createMockGeneration(sampleInput);
+    const result = generationHistorySchema.safeParse([
+      {
+        id: "old-record",
+        inputText: sampleInput,
+        output,
+        provider: "mock",
+        promptVersion: "llm-app-poc-v1",
+        modelName: "mock-local",
+        createdAt: new Date().toISOString()
+      }
+    ]);
+
+    expect(result.success).toBe(true);
+  });
 });
 
 describe("generation service", () => {
@@ -36,6 +59,8 @@ describe("generation service", () => {
 
     expect(result.provider).toBe("mock");
     expect(result.modelName).toBe("mock-local");
+    expect(result.providerLatencyMs).toEqual(expect.any(Number));
+    expect(result.providerLatencyMs).toBeGreaterThanOrEqual(0);
     expect(() => generationOutputSchema.parse(result.output)).not.toThrow();
   });
 
@@ -66,7 +91,12 @@ describe("generation service", () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       json: async () => ({
-        output_text: JSON.stringify(createMockGeneration(sampleInput))
+        output_text: JSON.stringify(createMockGeneration(sampleInput)),
+        usage: {
+          input_tokens: 11,
+          output_tokens: 22,
+          total_tokens: 33
+        }
       })
     }));
     vi.stubGlobal("fetch", fetchMock);
@@ -88,6 +118,9 @@ describe("generation service", () => {
       model: "test-openai-model"
     });
     expect(String(requestInit.body)).not.toContain("test-gemini-key");
+    expect(result.inputTokens).toBe(11);
+    expect(result.outputTokens).toBe(22);
+    expect(result.totalTokens).toBe(33);
   });
 
   it("parses Gemini response.text", async () => {
@@ -96,7 +129,12 @@ describe("generation service", () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       json: async () => ({
-        text: JSON.stringify(createMockGeneration(sampleInput))
+        text: JSON.stringify(createMockGeneration(sampleInput)),
+        usageMetadata: {
+          promptTokenCount: 13,
+          candidatesTokenCount: 21,
+          totalTokenCount: 34
+        }
       })
     }));
     vi.stubGlobal("fetch", fetchMock);
@@ -121,6 +159,9 @@ describe("generation service", () => {
     expect(String(requestInit?.body)).not.toContain("test-key");
     expect(result.provider).toBe("gemini");
     expect(result.modelName).toBe("gemini-2.5-flash");
+    expect(result.inputTokens).toBe(13);
+    expect(result.outputTokens).toBe(21);
+    expect(result.totalTokens).toBe(34);
     expect(() => generationOutputSchema.parse(result.output)).not.toThrow();
   });
 
@@ -175,6 +216,9 @@ describe("generation service", () => {
     expect(String(requestInit.body)).not.toContain("test-anthropic-key");
     expect(String(requestInit.body)).not.toContain("test-openai-key");
     expect(String(requestInit.body)).not.toContain("test-gemini-key");
+    expect(result.inputTokens).toBe(10);
+    expect(result.outputTokens).toBe(20);
+    expect(result.totalTokens).toBe(30);
     expect(() => generationOutputSchema.parse(result.output)).not.toThrow();
   });
 
@@ -571,5 +615,42 @@ describe("POST /api/generate", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: "要件メモを入力してください。"
     });
+  });
+
+  it("returns latency metadata for successful generation", async () => {
+    const dataPath = path.join(process.cwd(), "data", "generations.json");
+    const hadDataFile = existsSync(dataPath);
+    const originalData = hadDataFile ? readFileSync(dataPath, "utf8") : "[]\n";
+    vi.stubEnv("LLM_PROVIDER", "mock");
+
+    try {
+      const response = await POST(
+        new Request("http://localhost/api/generate", {
+          method: "POST",
+          body: JSON.stringify({ inputText: sampleInput })
+        })
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.provider).toBe("mock");
+      expect(body.modelName).toBe("mock-local");
+      expect(body.providerLatencyMs).toEqual(expect.any(Number));
+      expect(body.providerLatencyMs).toBeGreaterThanOrEqual(0);
+      expect(body.serverProcessingMs).toEqual(expect.any(Number));
+      expect(body.serverProcessingMs).toBeGreaterThanOrEqual(0);
+    } finally {
+      writeFileSync(dataPath, originalData, "utf8");
+    }
+  });
+});
+
+describe("generation UI", () => {
+  it("contains client elapsed latency display wiring", () => {
+    const pageSource = readFileSync(path.join(process.cwd(), "app", "page.tsx"), "utf8");
+
+    expect(pageSource).toContain("clientElapsedMs");
+    expect(pageSource).toContain("performance.now()");
+    expect(pageSource).toContain("Client elapsed");
   });
 });

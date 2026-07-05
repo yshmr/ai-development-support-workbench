@@ -25,6 +25,8 @@ export const generationOutputSchema = z.object({
   risks: z.array(z.string().min(1)).min(1)
 });
 
+const optionalNonNegativeNumberSchema = z.number().nonnegative().optional();
+
 export const generationRecordSchema = z.object({
   id: z.string().min(1),
   inputText: z.string().min(1),
@@ -32,6 +34,11 @@ export const generationRecordSchema = z.object({
   provider: llmProviderSchema.default("mock"),
   promptVersion: z.string().min(1),
   modelName: z.string().min(1),
+  providerLatencyMs: optionalNonNegativeNumberSchema,
+  serverProcessingMs: optionalNonNegativeNumberSchema,
+  inputTokens: optionalNonNegativeNumberSchema,
+  outputTokens: optionalNonNegativeNumberSchema,
+  totalTokens: optionalNonNegativeNumberSchema,
   createdAt: z.string().datetime()
 });
 

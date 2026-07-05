@@ -48,3 +48,36 @@ export async function saveGeneration(
 
   return parsedRecord;
 }
+
+export async function updateGenerationMetadata(
+  id: string,
+  metadata: Partial<
+    Pick<
+      GenerationRecord,
+      | "providerLatencyMs"
+      | "serverProcessingMs"
+      | "inputTokens"
+      | "outputTokens"
+      | "totalTokens"
+    >
+  >
+): Promise<GenerationRecord | undefined> {
+  const records = await listGenerations();
+  const existingRecord = records.find((record) => record.id === id);
+
+  if (!existingRecord) {
+    return undefined;
+  }
+
+  const updatedRecord = generationRecordSchema.parse({
+    ...existingRecord,
+    ...metadata
+  });
+  const nextRecords = records.map((record) =>
+    record.id === id ? updatedRecord : record
+  );
+
+  await fs.writeFile(dataFile, `${JSON.stringify(nextRecords, null, 2)}\n`, "utf8");
+
+  return updatedRecord;
+}

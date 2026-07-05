@@ -195,6 +195,7 @@ npm run test:e2e
 
 - [LLMアプリ開発PoC 評価設計](docs/llm_app_poc/llm_app_poc_evaluation_v0_1.md)
 - [LLMアプリ開発PoC 評価結果](docs/llm_app_poc/evaluation_results.md)
+- [LLMアプリ開発PoC レイテンシ評価](docs/llm_app_poc/latency_evaluation.md)
 - [LLMアプリ開発PoC ポートフォリオ要約](docs/llm_app_poc/portfolio_summary.md)
 - [追加サンプル入力案](docs/llm_app_poc/sample_inputs.md)
 
