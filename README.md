@@ -199,6 +199,60 @@ npm run test:e2e
 - [LLMアプリ開発PoC ポートフォリオ要約](docs/llm_app_poc/portfolio_summary.md)
 - [追加サンプル入力案](docs/llm_app_poc/sample_inputs.md)
 
+## RAG PoC Phase 1-A
+
+RAG PoC Phase 1-Aでは、既存 `/api/generate` へRAG contextを注入せず、retrieval単体をQdrantで観測・評価できる状態にしています。
+
+参照資料:
+
+- [RAG PoC Qdrant仕様](docs/rag_poc/rag_poc_spec_v0_2_qdrant.md)
+- [RAG PoC 評価設計](docs/rag_poc/rag_poc_evaluation_v0_1.md)
+- [RAG PoC Retrieval評価結果](docs/rag_poc/retrieval_evaluation_results.md)
+- [RAG PoC ポートフォリオ要約](docs/rag_poc/portfolio_summary.md)
+- [RAG Retrieval Foundation task](docs/rag_poc/codex_task_01_rag_retrieval_foundation_qdrant.md)
+
+ローカルQdrant:
+
+```bash
+docker compose up -d qdrant
+docker compose ps
+```
+
+`.env.local` には以下を設定します。`OPENAI_API_KEY` は既存のOpenAI設定と共用し、値はコミットしません。
+
+```env
+RAG_EMBEDDING_PROVIDER=openai
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=
+```
+
+ingestion:
+
+```bash
+npm run rag:ingest:fixed
+npm run rag:ingest:heading
+```
+
+retrieval evaluation:
+
+```bash
+npm run rag:evaluate:fixed
+npm run rag:evaluate:heading
+```
+
+Phase 1-A / 1-Bの実測では、`heading-aware-v1` がHit@5 1.000、MRR 1.000、Source Recall@5 1.000となり、`fixed-size-v1`のMRR 0.854から改善した。Phase 1-Cのgrounded generationでは `heading-aware-v1` を使用する方針です。
+
+debug API:
+
+```bash
+curl -X POST http://localhost:3000/api/rag/search \
+  -H "Content-Type: application/json" \
+  -d "{\"query\":\"プロフィール画像のアップロード制約と即時反映方法\",\"strategy\":\"heading-aware-v1\",\"topK\":5}"
+```
+
+Qdrant dashboardは `http://localhost:6333/dashboard` で確認できます。local Qdrant storage、`.env.local`、APIキー、`data/generations.json` はGit管理対象にしません。
+
 ## 今後の拡張予定
 
 - SQLite + Prisma への履歴保存差し替え

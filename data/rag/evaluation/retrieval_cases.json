@@ -1,0 +1,50 @@
+[
+  {
+    "id": "CASE-001",
+    "query": "プロフィール画像で許可されるファイルサイズと形式を知りたい",
+    "expectedDocumentIds": ["profile-image-spec"],
+    "notes": "アップロード制約のサイズと形式を確認する。"
+  },
+  {
+    "id": "CASE-002",
+    "query": "プロフィール画像を変更した直後に画面へ反映する方法",
+    "expectedDocumentIds": ["frontend-cache-guideline", "profile-image-spec"],
+    "notes": "即時反映とキャッシュ更新の両方を期待する。"
+  },
+  {
+    "id": "CASE-003",
+    "query": "画像アップロードで拡張子偽装や不正ファイルを防ぎたい",
+    "expectedDocumentIds": ["media-upload-security"],
+    "notes": "MIMEと実体検証、危険ファイル拒否を期待する。"
+  },
+  {
+    "id": "CASE-004",
+    "query": "プロフィール画像更新APIのレスポンスとエラーコード",
+    "expectedDocumentIds": ["profile-api"],
+    "notes": "API endpoint、成功レスポンス、validation/server errorを期待する。"
+  },
+  {
+    "id": "CASE-005",
+    "query": "画像アップロード失敗時にユーザーへ何を表示するか",
+    "expectedDocumentIds": ["error-message-guideline"],
+    "notes": "ユーザー向けの行動可能なエラーメッセージを期待する。"
+  },
+  {
+    "id": "CASE-006",
+    "query": "プロフィール画像を置き換えた後の古い画像や不完全ファイルの扱い",
+    "expectedDocumentIds": ["storage-lifecycle"],
+    "notes": "新画像切替、失敗時cleanup、旧画像cleanup policyを期待する。"
+  },
+  {
+    "id": "CASE-007",
+    "query": "通知設定でメール通知を無効にする仕様",
+    "expectedDocumentIds": ["notification-settings-spec"],
+    "notes": "プロフィール画像とは別機能の検索精度確認。"
+  },
+  {
+    "id": "CASE-008",
+    "query": "検索結果をステータスで絞り込む仕様",
+    "expectedDocumentIds": ["search-filter-spec"],
+    "notes": "検索filter仕様のdistractor識別確認。"
+  }
+]

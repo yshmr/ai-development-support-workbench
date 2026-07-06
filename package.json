@@ -12,9 +12,17 @@
     "test:e2e": "playwright test",
     "check:gemini": "node scripts/check-gemini.mjs",
     "check:gemini-provider": "node scripts/check-gemini-provider.mjs",
-    "check:openai-provider": "node scripts/check-openai-provider.mjs"
+    "check:openai-provider": "node scripts/check-openai-provider.mjs",
+    "rag:ingest": "tsx scripts/rag-ingest.ts",
+    "rag:ingest:fixed": "tsx scripts/rag-ingest.ts fixed-size-v1",
+    "rag:ingest:heading": "tsx scripts/rag-ingest.ts heading-aware-v1",
+    "rag:evaluate": "tsx scripts/rag-evaluate.ts",
+    "rag:evaluate:fixed": "tsx scripts/rag-evaluate.ts fixed-size-v1",
+    "rag:evaluate:heading": "tsx scripts/rag-evaluate.ts heading-aware-v1"
   },
   "dependencies": {
+    "@next/env": "^15.5.20",
+    "@qdrant/js-client-rest": "^1.18.0",
     "next": "^15.4.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
@@ -25,6 +33,7 @@
     "@types/node": "^24.0.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
+    "tsx": "^4.23.0",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"
   }

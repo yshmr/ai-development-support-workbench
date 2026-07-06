@@ -6,3 +6,4 @@ playwright-report/
 tsconfig.tsbuildinfo
 data/generations.json
 .env*.local
+qdrant_storage/
