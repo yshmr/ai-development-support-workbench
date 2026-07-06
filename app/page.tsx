@@ -5,6 +5,7 @@ import type {
   GenerationOutput,
   GenerationRecord,
   JiraTaskType,
+  RagContextPolicy,
   RagMetadata,
   RagMode,
   RagSource
@@ -35,6 +36,20 @@ const taskTypeLabels: Record<JiraTaskType, string> = {
   backend: "Backend",
   test: "Test",
   documentation: "Docs"
+};
+
+const ragContextPolicyLabels: Record<RagContextPolicy, string> = {
+  "raw-top-k-v1": "Baseline",
+  "document-cap-v1": "Document cap",
+  "document-diversity-v1": "Document diversity"
+};
+
+const ragContextPolicyHelp: Record<RagContextPolicy, string> = {
+  "raw-top-k-v1": "Semantic Top 5をそのまま使用",
+  "document-cap-v1":
+    "Semantic Top 10から同一document最大2 chunksで最大5件選択",
+  "document-diversity-v1":
+    "Semantic Top 10からdocument diversityを優先し、各documentの最初のchunkを確保した後、最大2 chunks/documentで最大5件を構成"
 };
 
 function ListSection({ title, items }: { title: string; items: string[] }) {
@@ -88,8 +103,16 @@ function SourceList({ sources }: { sources: RagSource[] }) {
             </summary>
             <dl className="source-meta">
               <div>
-                <dt>Rank</dt>
-                <dd>{source.rank}</dd>
+                <dt>Context rank</dt>
+                <dd>{source.contextRank ?? source.rank}</dd>
+              </div>
+              <div>
+                <dt>Retrieval rank</dt>
+                <dd>{source.retrievalRank ?? source.rank}</dd>
+              </div>
+              <div>
+                <dt>Score</dt>
+                <dd>{formatScore(source.score)}</dd>
               </div>
               <div>
                 <dt>Chunk</dt>
@@ -138,6 +161,10 @@ function ResultView({
   };
 }) {
   const rag = meta?.rag ?? { mode: "off" as const };
+  const contextPolicyLabel =
+    rag.mode === "on"
+      ? rag.contextPolicy ?? "legacy raw Top-K"
+      : undefined;
 
   return (
     <div className="result-grid">
@@ -200,9 +227,61 @@ function ResultView({
                   <dd>{rag.strategy}</dd>
                 </div>
                 <div>
+                  <dt>Context policy</dt>
+                  <dd>{contextPolicyLabel}</dd>
+                </div>
+                <div>
                   <dt>Top K</dt>
                   <dd>{rag.topK}</dd>
                 </div>
+                {rag.candidateTopK ? (
+                  <div>
+                    <dt>Candidate Top K</dt>
+                    <dd>{rag.candidateTopK}</dd>
+                  </div>
+                ) : null}
+                {typeof rag.candidateChunkCount === "number" ? (
+                  <div>
+                    <dt>Candidate chunks</dt>
+                    <dd>{rag.candidateChunkCount}</dd>
+                  </div>
+                ) : null}
+                {typeof rag.candidateUniqueDocumentCount === "number" ? (
+                  <div>
+                    <dt>Candidate unique docs</dt>
+                    <dd>{rag.candidateUniqueDocumentCount}</dd>
+                  </div>
+                ) : null}
+                {rag.requestedFinalTopK ? (
+                  <div>
+                    <dt>Final Top K</dt>
+                    <dd>{rag.requestedFinalTopK}</dd>
+                  </div>
+                ) : null}
+                {rag.maxChunksPerDocument ? (
+                  <div>
+                    <dt>Max chunks / doc</dt>
+                    <dd>{rag.maxChunksPerDocument}</dd>
+                  </div>
+                ) : null}
+                {typeof rag.selectedChunkCount === "number" ? (
+                  <div>
+                    <dt>Selected chunks</dt>
+                    <dd>{rag.selectedChunkCount}</dd>
+                  </div>
+                ) : null}
+                {typeof rag.uniqueDocumentCount === "number" ? (
+                  <div>
+                    <dt>Selected unique docs</dt>
+                    <dd>{rag.uniqueDocumentCount}</dd>
+                  </div>
+                ) : null}
+                {typeof rag.maximumChunksFromSameDocument === "number" ? (
+                  <div>
+                    <dt>Max selected / doc</dt>
+                    <dd>{rag.maximumChunksFromSameDocument}</dd>
+                  </div>
+                ) : null}
                 <div>
                   <dt>Retrieval</dt>
                   <dd>{formatDuration(rag.retrievalLatencyMs)}</dd>
@@ -253,6 +332,8 @@ function ResultView({
 export default function Home() {
   const [inputText, setInputText] = useState(sampleInput);
   const [ragMode, setRagMode] = useState<RagMode>("off");
+  const [ragContextPolicy, setRagContextPolicy] =
+    useState<RagContextPolicy>("raw-top-k-v1");
   const [result, setResult] = useState<GeneratedResponse | null>(null);
   const [history, setHistory] = useState<GenerationRecord[]>([]);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
@@ -310,7 +391,7 @@ export default function Home() {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ inputText, ragMode })
+        body: JSON.stringify({ inputText, ragMode, ragContextPolicy })
       });
       const data = await response.json();
 
@@ -421,6 +502,40 @@ export default function Home() {
                 </button>
               </div>
             </div>
+            {ragMode === "on" ? (
+              <fieldset className="policy-control">
+                <legend>Context policy</legend>
+                <div className="policy-options">
+                  {(
+                    [
+                      "raw-top-k-v1",
+                      "document-cap-v1",
+                      "document-diversity-v1"
+                    ] as RagContextPolicy[]
+                  ).map((policy) => (
+                    <label
+                      key={policy}
+                      className={
+                        ragContextPolicy === policy
+                          ? "policy-option active"
+                          : "policy-option"
+                      }
+                    >
+                      <input
+                        type="radio"
+                        name="ragContextPolicy"
+                        value={policy}
+                        checked={ragContextPolicy === policy}
+                        onChange={() => setRagContextPolicy(policy)}
+                      />
+                      <span>{ragContextPolicyLabels[policy]}</span>
+                      <small>{policy}</small>
+                      <small>{ragContextPolicyHelp[policy]}</small>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            ) : null}
             {error ? <p className="error-message">{error}</p> : null}
             <button className="primary-button" type="submit" disabled={isLoading}>
               {isLoading ? "生成中..." : "生成する"}

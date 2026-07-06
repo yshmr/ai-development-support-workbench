@@ -192,6 +192,59 @@ textarea:focus {
   background: #fbfcfd;
 }
 
+.policy-control {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: #fbfcfd;
+}
+
+.policy-control legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.policy-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.policy-option {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px;
+  background: var(--surface);
+}
+
+.policy-option.active {
+  border-color: var(--primary);
+  background: var(--surface-strong);
+}
+
+.policy-option input {
+  margin: 0;
+}
+
+.policy-option span {
+  font-weight: 700;
+}
+
+.policy-option small {
+  min-width: 0;
+  color: var(--muted);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .control-label,
 .control-help {
   margin: 0;
@@ -561,6 +614,10 @@ textarea:focus {
   .rag-control {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .policy-options {
+    grid-template-columns: 1fr;
   }
 
   .source-item summary {

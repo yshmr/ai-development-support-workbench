@@ -31,6 +31,14 @@ A / Bのmetricとmanual reviewを比較し、RAG integrationに使用するstrat
 
 選定strategyを既存LLMアプリへ統合し、grounded generation品質を比較する。
 
+### Evaluation E — Context diversity iteration
+
+Phase 1-Dで観測したsame-document chunk concentrationに対して、semantic retrieval後のcontext selection policyだけを変更する。最初に`raw-top-k-v1`と`document-cap-v1`をsmoke testし、per-document capだけではuniqueDocumentCount@5が改善しないnegative resultを記録した。続いて、diversity-first two-pass selectionの`document-diversity-v1`を追加し、正式評価の主比較を`raw-top-k-v1` vs `document-diversity-v1`で実施した。
+
+このiterationでは、Phase 1-A / 1-Bのretrieval metrics、`heading-aware-v1`、embedding model、generation prompt、GenerationOutput schemaは変更しない。詳細な評価テンプレートは `docs/rag_poc/context_diversity_evaluation.md` に記録する。
+
+Phase 1-E formal evaluationでは、`document-diversity-v1`によりuniqueDocumentCount@5は3から5へ改善し、maximumChunksFromSameDocumentは3から1へ低下した。Common 5-axis averageはraw 4.7、document-diversity 4.7で品質は概ね維持され、RAG-specific axesはsource coverage面で改善した。このため結論カテゴリは **B. Diversity improves and source coverage improves, quality is roughly maintained** とする。
+
 ## 3. Retrieval cases
 
 配置:

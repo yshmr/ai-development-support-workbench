@@ -6,6 +6,11 @@ import { POST } from "@/app/api/rag/search/route";
 import { chunkDocumentFixedSize, chunkDocumentHeadingAware } from "@/lib/rag/chunker";
 import { loadRagCliEnv, parseRagCliArgs } from "@/lib/rag/cli";
 import { buildGroundedContext } from "@/lib/rag/context";
+import {
+  calculateContextCompositionMetrics,
+  getCandidateTopKForContextPolicy,
+  selectRagContextChunks
+} from "@/lib/rag/context-selection";
 import { createOpenAiEmbeddings } from "@/lib/rag/embedding";
 import {
   evaluateRetrievedChunks,
@@ -472,6 +477,8 @@ describe("grounded generation context", () => {
 
     expect(first).toEqual(second);
     expect(first.sources.map((source) => source.sourceId)).toEqual(["S1", "S2"]);
+    expect(first.sources.map((source) => source.contextRank)).toEqual([1, 2]);
+    expect(first.sources.map((source) => source.retrievalRank)).toEqual([1, 2]);
     expect(first.contextText).toContain("<retrieved_product_knowledge>");
     expect(first.contextText).toContain("</retrieved_product_knowledge>");
     expect(first.contextText).toContain("[S1]");
@@ -493,6 +500,247 @@ describe("grounded generation context", () => {
     expect(() => buildGroundedContext([])).toThrow(
       "RAG retrieval returned no usable chunks"
     );
+  });
+});
+
+describe("RAG context selection", () => {
+  function chunk(rank: number, documentId: string): RetrievedChunk {
+    return {
+      rank,
+      score: 1 - rank / 100,
+      chunkId: `${documentId}-${rank}`,
+      documentId,
+      sourcePath: `data/rag/knowledge/${documentId}.md`,
+      documentTitle: documentId,
+      headingPath: ["Section"],
+      content: `${documentId} content ${rank}`
+    };
+  }
+
+  const candidates = [
+    chunk(1, "profile-image-spec"),
+    chunk(2, "profile-image-spec"),
+    chunk(3, "profile-image-spec"),
+    chunk(4, "error-message-guideline"),
+    chunk(5, "profile-api"),
+    chunk(6, "frontend-cache-guideline"),
+    chunk(7, "media-upload-security")
+  ];
+
+  it("maps context policies to retrieval candidate counts", () => {
+    expect(getCandidateTopKForContextPolicy("raw-top-k-v1")).toBe(5);
+    expect(getCandidateTopKForContextPolicy("document-cap-v1")).toBe(10);
+    expect(getCandidateTopKForContextPolicy("document-diversity-v1")).toBe(10);
+  });
+
+  it("keeps raw semantic Top 5 as the baseline policy", () => {
+    const selected = selectRagContextChunks(candidates, "raw-top-k-v1");
+
+    expect(selected.selectedChunks.map((candidate) => candidate.rank)).toEqual([
+      1, 2, 3, 4, 5
+    ]);
+    expect(selected.selectedChunks.map((candidate) => candidate.contextRank)).toEqual([
+      1, 2, 3, 4, 5
+    ]);
+    expect(selected.selectedChunks.map((candidate) => candidate.retrievalRank)).toEqual([
+      1, 2, 3, 4, 5
+    ]);
+    expect(selected.metrics).toMatchObject({
+      selectedChunkCount: 5,
+      uniqueDocumentCount: 3,
+      maximumChunksFromSameDocument: 3,
+      duplicateSlotCount: 2
+    });
+    expect(selected.candidateMetrics).toMatchObject({
+      selectedChunkCount: 7,
+      uniqueDocumentCount: 5,
+      maximumChunksFromSameDocument: 3
+    });
+  });
+
+  it("caps document chunks at two while preserving original retrieval order", () => {
+    const selected = selectRagContextChunks(candidates, "document-cap-v1");
+
+    expect(selected.selectedChunks.map((candidate) => candidate.documentId)).toEqual([
+      "profile-image-spec",
+      "profile-image-spec",
+      "error-message-guideline",
+      "profile-api",
+      "frontend-cache-guideline"
+    ]);
+    expect(selected.selectedChunks.map((candidate) => candidate.retrievalRank)).toEqual([
+      1, 2, 4, 5, 6
+    ]);
+    expect(selected.selectedChunks.map((candidate) => candidate.contextRank)).toEqual([
+      1, 2, 3, 4, 5
+    ]);
+    expect(selected.selectedChunks[4].score).toBe(candidates[5].score);
+    expect(selected.metrics).toMatchObject({
+      selectedChunkCount: 5,
+      uniqueDocumentCount: 4,
+      maximumChunksFromSameDocument: 2,
+      duplicateSlotCount: 1
+    });
+    expect(selected.metrics.documentChunkCounts).toMatchObject({
+      "profile-image-spec": 2,
+      "error-message-guideline": 1,
+      "profile-api": 1,
+      "frontend-cache-guideline": 1
+    });
+  });
+
+  it("selects unique documents first and then fills second chunks", () => {
+    const selected = selectRagContextChunks(
+      [
+        chunk(1, "A"),
+        chunk(2, "A"),
+        chunk(3, "A"),
+        chunk(4, "B"),
+        chunk(5, "C"),
+        chunk(6, "C"),
+        chunk(7, "D")
+      ],
+      "document-diversity-v1"
+    );
+
+    expect(selected.selectedChunks.map((candidate) => candidate.retrievalRank)).toEqual([
+      1, 2, 4, 5, 7
+    ]);
+    expect(selected.selectedChunks.map((candidate) => candidate.contextRank)).toEqual([
+      1, 2, 3, 4, 5
+    ]);
+    expect(selected.selectedChunks.map((candidate) => candidate.documentId)).toEqual([
+      "A",
+      "A",
+      "B",
+      "C",
+      "D"
+    ]);
+    expect(selected.selectedChunks[1].score).toBe(0.98);
+    expect(selected.metrics).toMatchObject({
+      selectedChunkCount: 5,
+      uniqueDocumentCount: 4,
+      maximumChunksFromSameDocument: 2,
+      duplicateSlotCount: 1
+    });
+  });
+
+  it("uses the first five unique documents when available", () => {
+    const selected = selectRagContextChunks(
+      [
+        chunk(1, "A"),
+        chunk(2, "B"),
+        chunk(3, "C"),
+        chunk(4, "D"),
+        chunk(5, "E"),
+        chunk(6, "A")
+      ],
+      "document-diversity-v1"
+    );
+
+    expect(selected.selectedChunks.map((candidate) => candidate.documentId)).toEqual([
+      "A",
+      "B",
+      "C",
+      "D",
+      "E"
+    ]);
+    expect(selected.metrics.maximumChunksFromSameDocument).toBe(1);
+  });
+
+  it("fills fewer than five diversity chunks without fallback when candidates are limited", () => {
+    const selected = selectRagContextChunks(
+      [chunk(1, "A"), chunk(2, "A"), chunk(3, "A"), chunk(4, "B")],
+      "document-diversity-v1"
+    );
+
+    expect(selected.selectedChunks.map((candidate) => candidate.retrievalRank)).toEqual([
+      1, 2, 4
+    ]);
+    expect(selected.metrics).toMatchObject({
+      selectedChunkCount: 3,
+      uniqueDocumentCount: 2,
+      maximumChunksFromSameDocument: 2
+    });
+  });
+
+  it("keeps only two chunks when one document dominates diversity candidates", () => {
+    const selected = selectRagContextChunks(
+      [chunk(1, "A"), chunk(2, "A"), chunk(3, "A")],
+      "document-diversity-v1"
+    );
+
+    expect(selected.selectedChunks.map((candidate) => candidate.retrievalRank)).toEqual([
+      1, 2
+    ]);
+    expect(selected.metrics.documentChunkCounts).toEqual({ A: 2 });
+  });
+
+  it("does not select duplicate chunk identities twice", () => {
+    const duplicate = chunk(1, "A");
+    const selected = selectRagContextChunks(
+      [
+        duplicate,
+        { ...duplicate, rank: 2, score: 0.98 },
+        chunk(3, "B"),
+        chunk(4, "C")
+      ],
+      "document-diversity-v1"
+    );
+
+    expect(selected.selectedChunks.map((candidate) => candidate.chunkId)).toEqual([
+      duplicate.chunkId,
+      "B-3",
+      "C-4"
+    ]);
+    expect(selected.metrics.uniqueDocumentCount).toBe(3);
+  });
+
+  it("allows fewer than five final chunks without adaptive fallback", () => {
+    const selected = selectRagContextChunks(
+      [chunk(1, "profile-image-spec"), chunk(2, "profile-image-spec"), chunk(3, "profile-image-spec")],
+      "document-cap-v1"
+    );
+
+    expect(selected.selectedChunks).toHaveLength(2);
+    expect(selected.metrics).toMatchObject({
+      selectedChunkCount: 2,
+      uniqueDocumentCount: 1,
+      maximumChunksFromSameDocument: 2,
+      duplicateSlotCount: 1
+    });
+  });
+
+  it("returns deterministic empty metrics for zero candidates", () => {
+    const selected = selectRagContextChunks([], "document-cap-v1");
+
+    expect(selected.selectedChunks).toEqual([]);
+    expect(selected.metrics).toEqual({
+      selectedChunkCount: 0,
+      uniqueDocumentCount: 0,
+      maximumChunksFromSameDocument: 0,
+      documentChunkCounts: {},
+      duplicateSlotCount: 0
+    });
+  });
+
+  it("calculates context composition metrics independently", () => {
+    expect(
+      calculateContextCompositionMetrics([
+        { documentId: "a" },
+        { documentId: "a" },
+        { documentId: "b" }
+      ])
+    ).toEqual({
+      selectedChunkCount: 3,
+      uniqueDocumentCount: 2,
+      maximumChunksFromSameDocument: 2,
+      documentChunkCounts: {
+        a: 2,
+        b: 1
+      },
+      duplicateSlotCount: 1
+    });
   });
 });
 

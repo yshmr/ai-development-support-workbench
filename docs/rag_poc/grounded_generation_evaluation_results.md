@@ -264,6 +264,8 @@ RAG ONは、RAG OFFに比べてAPI契約、request形式、field名、latest pro
 
 1. **Per-document chunk cap / document-level diversity constraint**
    - Top 5のうち同一documentが3slotを占有したため、まず小さな変更でdocument diversityを確保できるか検討する。
+   - Phase 1-Eのsmoke testでは、`document-cap-v1`によりmaximumChunksFromSameDocumentは3から2へ下がったが、uniqueDocumentCount@5は3のままだった。negative resultとして記録し、次のrefined candidateとして`document-diversity-v1`を検証する。評価テンプレートは `docs/rag_poc/context_diversity_evaluation.md` を参照する。
+   - Phase 1-E formal evaluationでは、`document-diversity-v1`によりuniqueDocumentCount@5は3から5、maximumChunksFromSameDocumentは3から1へ改善した。Common 5-axis averageはraw 4.7、document-diversity 4.7で、品質は概ね維持された。詳細は `docs/rag_poc/context_diversity_evaluation.md` を参照する。
 2. **Document deduplication after retrieval**
    - chunk単位retrievalは維持しつつ、context assembly時にdocument単位で代表chunkを選ぶ案。
 3. **TopK increase with context budget**

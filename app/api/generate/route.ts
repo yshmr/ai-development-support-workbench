@@ -5,6 +5,10 @@ import { saveGeneration, updateGenerationMetadata } from "@/lib/storage";
 import { generateRequestSchema, type RagMetadata } from "@/lib/schema";
 import { getGroundedGenerationRagConfig } from "@/lib/rag/config";
 import { buildGroundedContext } from "@/lib/rag/context";
+import {
+  getCandidateTopKForContextPolicy,
+  selectRagContextChunks
+} from "@/lib/rag/context-selection";
 import * as ragRetriever from "@/lib/rag/retriever";
 
 export const runtime = "nodejs";
@@ -53,14 +57,20 @@ export async function POST(request: Request) {
 
     if (parsedRequest.data.ragMode === "on") {
       const ragConfig = getGroundedGenerationRagConfig();
+      const contextPolicy = parsedRequest.data.ragContextPolicy;
+      const candidateTopK = getCandidateTopKForContextPolicy(contextPolicy);
       const retrievalStartedAtMs = getTimerNow();
       const retrieval = await ragRetriever.retrieveRagChunks({
         query: parsedRequest.data.inputText,
         strategy: ragConfig.strategy,
-        topK: ragConfig.topK
+        topK: candidateTopK
       });
       const retrievalLatencyMs = toNonNegativeDurationMs(retrievalStartedAtMs);
-      const groundedContext = buildGroundedContext(retrieval.results);
+      const selection = selectRagContextChunks(
+        retrieval.results,
+        contextPolicy
+      );
+      const groundedContext = buildGroundedContext(selection.selectedChunks);
 
       ragContextText = groundedContext.contextText;
       ragMetadata = {
@@ -69,6 +79,19 @@ export async function POST(request: Request) {
         topK: ragConfig.topK,
         embeddingModel: retrieval.embeddingModel,
         retrievalLatencyMs,
+        contextPolicy: selection.policy,
+        candidateTopK: selection.candidateTopK,
+        candidateChunkCount: selection.candidateMetrics.selectedChunkCount,
+        candidateUniqueDocumentCount: selection.candidateMetrics.uniqueDocumentCount,
+        candidateDocumentChunkCounts:
+          selection.candidateMetrics.documentChunkCounts,
+        requestedFinalTopK: selection.requestedFinalTopK,
+        maxChunksPerDocument: selection.maxChunksPerDocument,
+        selectedChunkCount: selection.metrics.selectedChunkCount,
+        uniqueDocumentCount: selection.metrics.uniqueDocumentCount,
+        maximumChunksFromSameDocument:
+          selection.metrics.maximumChunksFromSameDocument,
+        documentChunkCounts: selection.metrics.documentChunkCounts,
         sources: groundedContext.sources,
         embeddingUsage: retrieval.embeddingUsage
       };

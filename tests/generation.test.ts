@@ -5,10 +5,12 @@ import { POST } from "@/app/api/generate/route";
 import { generateFromRequirementMemo } from "@/lib/generator";
 import { createMockGeneration } from "@/lib/mock-generator";
 import * as ragRetriever from "@/lib/rag/retriever";
+import type { RetrievedChunk } from "@/lib/rag/schema";
 import {
   generationHistorySchema,
   generationOutputSchema,
   generateRequestSchema,
+  ragContextPolicySchema,
   ragMetadataSchema
 } from "@/lib/schema";
 
@@ -39,7 +41,7 @@ async function withPreservedGenerationData<T>(callback: () => Promise<T>) {
   }
 }
 
-function sampleRetrievedChunk() {
+function sampleRetrievedChunk(overrides: Partial<RetrievedChunk> = {}): RetrievedChunk {
   return {
     rank: 1,
     score: 0.91,
@@ -48,8 +50,59 @@ function sampleRetrievedChunk() {
     sourcePath: "data/rag/knowledge/profile-image-spec.md",
     documentTitle: "プロフィール画像仕様",
     headingPath: ["プロフィール画像", "アップロード制約"],
-    content: "プロフィール画像は5MBまで、JPG/PNGのみ許可する。"
+    content: "プロフィール画像は5MBまで、JPG/PNGのみ許可する。",
+    ...overrides
   };
+}
+
+function sampleRetrievedChunksForDocumentCap() {
+  return [
+    sampleRetrievedChunk({
+      rank: 1,
+      score: 0.91,
+      chunkId: "profile-1",
+      documentId: "profile-image-spec",
+      content: "SELECTED profile acceptance conditions"
+    }),
+    sampleRetrievedChunk({
+      rank: 2,
+      score: 0.9,
+      chunkId: "profile-2",
+      documentId: "profile-image-spec",
+      content: "SELECTED profile size and format"
+    }),
+    sampleRetrievedChunk({
+      rank: 3,
+      score: 0.89,
+      chunkId: "profile-3",
+      documentId: "profile-image-spec",
+      content: "SKIPPED THIRD PROFILE CHUNK"
+    }),
+    sampleRetrievedChunk({
+      rank: 4,
+      score: 0.88,
+      chunkId: "error-1",
+      documentId: "error-message-guideline",
+      documentTitle: "エラーメッセージガイドライン",
+      content: "SELECTED actionable error message"
+    }),
+    sampleRetrievedChunk({
+      rank: 5,
+      score: 0.87,
+      chunkId: "api-1",
+      documentId: "profile-api",
+      documentTitle: "プロフィールAPI仕様",
+      content: "SELECTED POST /api/profile/image"
+    }),
+    sampleRetrievedChunk({
+      rank: 6,
+      score: 0.86,
+      chunkId: "cache-1",
+      documentId: "frontend-cache-guideline",
+      documentTitle: "フロントエンドキャッシュ方針",
+      content: "SELECTED cache busting"
+    })
+  ];
 }
 
 describe("generation schema", () => {
@@ -86,13 +139,27 @@ describe("generation schema", () => {
     expect(generateRequestSchema.parse({ inputText: sampleInput }).ragMode).toBe(
       "off"
     );
+    expect(
+      generateRequestSchema.parse({ inputText: sampleInput }).ragContextPolicy
+    ).toBe("raw-top-k-v1");
+    expect(ragContextPolicySchema.parse("document-cap-v1")).toBe(
+      "document-cap-v1"
+    );
+    expect(ragContextPolicySchema.parse("document-diversity-v1")).toBe(
+      "document-diversity-v1"
+    );
 
     const invalid = generateRequestSchema.safeParse({
       inputText: sampleInput,
       ragMode: "maybe"
     });
+    const invalidPolicy = generateRequestSchema.safeParse({
+      inputText: sampleInput,
+      ragContextPolicy: "unknown-policy"
+    });
 
     expect(invalid.success).toBe(false);
+    expect(invalidPolicy.success).toBe(false);
   });
 
   it("accepts RAG metadata for old and grounded generation records", () => {
@@ -104,9 +171,27 @@ describe("generation schema", () => {
         topK: 5,
         embeddingModel: "text-embedding-3-small",
         retrievalLatencyMs: 12,
+        contextPolicy: "document-diversity-v1",
+        candidateTopK: 10,
+        candidateChunkCount: 4,
+        candidateUniqueDocumentCount: 2,
+        candidateDocumentChunkCounts: {
+          "profile-image-spec": 3,
+          "profile-api": 1
+        },
+        requestedFinalTopK: 5,
+        maxChunksPerDocument: 2,
+        selectedChunkCount: 1,
+        uniqueDocumentCount: 1,
+        maximumChunksFromSameDocument: 1,
+        documentChunkCounts: {
+          "profile-image-spec": 1
+        },
         sources: [
           {
             sourceId: "S1",
+            contextRank: 1,
+            retrievalRank: 1,
             ...sampleRetrievedChunk()
           }
         ],
@@ -716,7 +801,11 @@ describe("POST /api/generate", () => {
       const response = await POST(
         new Request("http://localhost/api/generate", {
           method: "POST",
-          body: JSON.stringify({ inputText: sampleInput, ragMode: "off" })
+          body: JSON.stringify({
+            inputText: sampleInput,
+            ragMode: "off",
+            ragContextPolicy: "document-cap-v1"
+          })
         })
       );
 
@@ -760,6 +849,20 @@ describe("POST /api/generate", () => {
         mode: "on",
         strategy: "heading-aware-v1",
         topK: 5,
+        contextPolicy: "raw-top-k-v1",
+        candidateTopK: 5,
+        candidateChunkCount: 1,
+        candidateUniqueDocumentCount: 1,
+        candidateDocumentChunkCounts: {
+          "profile-image-spec": 1
+        },
+        requestedFinalTopK: 5,
+        selectedChunkCount: 1,
+        uniqueDocumentCount: 1,
+        maximumChunksFromSameDocument: 1,
+        documentChunkCounts: {
+          "profile-image-spec": 1
+        },
         embeddingModel: "text-embedding-3-small",
         embeddingUsage: {
           promptTokens: 20,
@@ -770,9 +873,208 @@ describe("POST /api/generate", () => {
       expect(body.rag.sources[0]).toMatchObject({
         sourceId: "S1",
         documentId: "profile-image-spec",
-        rank: 1
+        rank: 1,
+        contextRank: 1,
+        retrievalRank: 1
       });
       expect(body.rag.sources[0].vector).toBeUndefined();
+    });
+  });
+
+  it("uses candidate Top 10 and document-cap selection when requested", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mock");
+    const retrieveSpy = vi
+      .spyOn(ragRetriever, "retrieveRagChunks")
+      .mockResolvedValueOnce({
+        query: sampleInput,
+        strategy: "heading-aware-v1",
+        topK: 10,
+        embeddingModel: "text-embedding-3-small",
+        results: sampleRetrievedChunksForDocumentCap()
+      });
+
+    await withPreservedGenerationData(async () => {
+      const response = await POST(
+        new Request("http://localhost/api/generate", {
+          method: "POST",
+          body: JSON.stringify({
+            inputText: sampleInput,
+            ragMode: "on",
+            ragContextPolicy: "document-cap-v1"
+          })
+        })
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(retrieveSpy).toHaveBeenCalledWith({
+        query: sampleInput,
+        strategy: "heading-aware-v1",
+        topK: 10
+      });
+      expect(body.rag).toMatchObject({
+        mode: "on",
+        contextPolicy: "document-cap-v1",
+        candidateTopK: 10,
+        candidateChunkCount: 6,
+        candidateUniqueDocumentCount: 4,
+        candidateDocumentChunkCounts: {
+          "profile-image-spec": 3,
+          "error-message-guideline": 1,
+          "profile-api": 1,
+          "frontend-cache-guideline": 1
+        },
+        requestedFinalTopK: 5,
+        maxChunksPerDocument: 2,
+        selectedChunkCount: 5,
+        uniqueDocumentCount: 4,
+        maximumChunksFromSameDocument: 2
+      });
+      expect(body.rag.sources.map((source: { documentId: string }) => source.documentId)).toEqual([
+        "profile-image-spec",
+        "profile-image-spec",
+        "error-message-guideline",
+        "profile-api",
+        "frontend-cache-guideline"
+      ]);
+      expect(body.rag.sources.map((source: { contextRank: number }) => source.contextRank)).toEqual([
+        1, 2, 3, 4, 5
+      ]);
+      expect(body.rag.sources.map((source: { retrievalRank: number }) => source.retrievalRank)).toEqual([
+        1, 2, 4, 5, 6
+      ]);
+    });
+  });
+
+  it("uses diversity-first selection when requested", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mock");
+    const retrieveSpy = vi
+      .spyOn(ragRetriever, "retrieveRagChunks")
+      .mockResolvedValueOnce({
+        query: sampleInput,
+        strategy: "heading-aware-v1",
+        topK: 10,
+        embeddingModel: "text-embedding-3-small",
+        results: sampleRetrievedChunksForDocumentCap()
+      });
+
+    await withPreservedGenerationData(async () => {
+      const response = await POST(
+        new Request("http://localhost/api/generate", {
+          method: "POST",
+          body: JSON.stringify({
+            inputText: sampleInput,
+            ragMode: "on",
+            ragContextPolicy: "document-diversity-v1"
+          })
+        })
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(retrieveSpy).toHaveBeenCalledWith({
+        query: sampleInput,
+        strategy: "heading-aware-v1",
+        topK: 10
+      });
+      expect(body.rag).toMatchObject({
+        contextPolicy: "document-diversity-v1",
+        candidateTopK: 10,
+        candidateChunkCount: 6,
+        candidateUniqueDocumentCount: 4,
+        requestedFinalTopK: 5,
+        maxChunksPerDocument: 2,
+        selectedChunkCount: 5,
+        uniqueDocumentCount: 4,
+        maximumChunksFromSameDocument: 2
+      });
+      expect(body.rag.sources.map((source: { retrievalRank: number }) => source.retrievalRank)).toEqual([
+        1, 2, 4, 5, 6
+      ]);
+      expect(body.rag.sources.map((source: { contextRank: number }) => source.contextRank)).toEqual([
+        1, 2, 3, 4, 5
+      ]);
+    });
+  });
+
+  it("can generate with fewer than five selected document-diversity chunks", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mock");
+    vi.spyOn(ragRetriever, "retrieveRagChunks").mockResolvedValueOnce({
+      query: sampleInput,
+      strategy: "heading-aware-v1",
+      topK: 10,
+      embeddingModel: "text-embedding-3-small",
+      results: [
+        sampleRetrievedChunk({ rank: 1, chunkId: "profile-1" }),
+        sampleRetrievedChunk({ rank: 2, chunkId: "profile-2" }),
+        sampleRetrievedChunk({ rank: 3, chunkId: "profile-3" })
+      ]
+    });
+
+    await withPreservedGenerationData(async () => {
+      const response = await POST(
+        new Request("http://localhost/api/generate", {
+          method: "POST",
+          body: JSON.stringify({
+            inputText: sampleInput,
+            ragMode: "on",
+            ragContextPolicy: "document-diversity-v1"
+          })
+        })
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.rag.selectedChunkCount).toBe(2);
+      expect(body.rag.uniqueDocumentCount).toBe(1);
+      expect(body.rag.sources).toHaveLength(2);
+    });
+  });
+
+  it("passes only selected context chunks to the provider", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openai");
+    vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
+    vi.spyOn(ragRetriever, "retrieveRagChunks").mockResolvedValueOnce({
+      query: sampleInput,
+      strategy: "heading-aware-v1",
+      topK: 10,
+      embeddingModel: "text-embedding-3-small",
+      results: sampleRetrievedChunksForDocumentCap()
+    });
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        output_text: JSON.stringify(createMockGeneration(sampleInput)),
+        usage: {
+          input_tokens: 1,
+          output_tokens: 2,
+          total_tokens: 3
+        }
+      })
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await withPreservedGenerationData(async () => {
+      const response = await POST(
+        new Request("http://localhost/api/generate", {
+          method: "POST",
+          body: JSON.stringify({
+            inputText: sampleInput,
+            ragMode: "on",
+            ragContextPolicy: "document-diversity-v1"
+          })
+        })
+      );
+      const requestBody = JSON.parse(
+        String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)
+      );
+      const userContent = requestBody.input[1].content as string;
+
+      expect(response.status).toBe(200);
+      expect(userContent).toContain("SELECTED profile acceptance conditions");
+      expect(userContent).toContain("SELECTED cache busting");
+      expect(userContent).not.toContain("SKIPPED THIRD PROFILE CHUNK");
+      expect(userContent).not.toContain("test-openai-key");
     });
   });
 
@@ -812,11 +1114,15 @@ describe("POST /api/generate", () => {
     });
 
     const response = await POST(
-      new Request("http://localhost/api/generate", {
-        method: "POST",
-        body: JSON.stringify({ inputText: sampleInput, ragMode: "on" })
-      })
-    );
+        new Request("http://localhost/api/generate", {
+          method: "POST",
+          body: JSON.stringify({
+            inputText: sampleInput,
+            ragMode: "on",
+            ragContextPolicy: "document-diversity-v1"
+          })
+        })
+      );
     const body = await response.json();
 
     expect(response.status).toBe(500);
@@ -837,6 +1143,24 @@ describe("POST /api/generate", () => {
     expect(response.status).toBe(400);
     expect(retrieveSpy).not.toHaveBeenCalled();
   });
+
+  it("rejects invalid context policy before retrieval", async () => {
+    const retrieveSpy = vi.spyOn(ragRetriever, "retrieveRagChunks");
+
+    const response = await POST(
+      new Request("http://localhost/api/generate", {
+        method: "POST",
+        body: JSON.stringify({
+          inputText: sampleInput,
+          ragMode: "on",
+          ragContextPolicy: "bad-policy"
+        })
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(retrieveSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("generation UI", () => {
@@ -851,6 +1175,19 @@ describe("generation UI", () => {
     expect(pageSource).toContain("performance.now()");
     expect(pageSource).toContain("Client elapsed");
     expect(pageSource).toContain("ragMode");
+    expect(pageSource).toContain("ragContextPolicy");
+    expect(pageSource).toContain("Context policy");
+    expect(pageSource).toContain("raw-top-k-v1");
+    expect(pageSource).toContain("document-cap-v1");
+    expect(pageSource).toContain("document-diversity-v1");
+    expect(pageSource).toContain("Candidate Top K");
+    expect(pageSource).toContain("Candidate chunks");
+    expect(pageSource).toContain("Candidate unique docs");
+    expect(pageSource).toContain("Selected chunks");
+    expect(pageSource).toContain("Selected unique docs");
+    expect(pageSource).toContain("Max selected / doc");
+    expect(pageSource).toContain("Context rank");
+    expect(pageSource).toContain("Retrieval rank");
     expect(pageSource).toContain("Retrieved Sources");
     expect(pageSource).toContain('setRagMode("on")');
     expect(pageSource).toContain('className="summary-content"');
@@ -866,6 +1203,8 @@ describe("generation UI", () => {
     );
     expect(cssSource).toContain("grid-template-columns: repeat(2, minmax(150px, 1fr));");
     expect(cssSource).toContain(".summary-content");
+    expect(cssSource).toContain(".policy-control");
+    expect(cssSource).toContain(".policy-options");
     expect(cssSource).not.toContain("grid-template-columns: minmax(0, 1fr) auto;");
   });
 });

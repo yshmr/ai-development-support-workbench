@@ -15,12 +15,22 @@ export const jiraTaskSchema = z.object({
 
 export const llmProviderSchema = z.enum(["mock", "openai", "gemini", "anthropic"]);
 export const ragModeSchema = z.enum(["off", "on"]);
+export const ragContextPolicySchema = z.enum([
+  "raw-top-k-v1",
+  "document-cap-v1",
+  "document-diversity-v1"
+]);
 
 const optionalNonNegativeNumberSchema = z.number().nonnegative().optional();
+const optionalDocumentChunkCountsSchema = z
+  .record(z.string(), z.number().int().nonnegative())
+  .optional();
 
 const ragSourceSchema = z.object({
   sourceId: z.string().min(1),
   rank: z.number().int().positive(),
+  contextRank: z.number().int().positive().optional(),
+  retrievalRank: z.number().int().positive().optional(),
   score: z.number(),
   chunkId: z.string().min(1),
   documentId: z.string().min(1),
@@ -45,6 +55,17 @@ export const ragMetadataSchema = z.discriminatedUnion("mode", [
     topK: z.literal(5),
     embeddingModel: z.string().min(1),
     retrievalLatencyMs: optionalNonNegativeNumberSchema,
+    contextPolicy: ragContextPolicySchema.optional(),
+    candidateTopK: z.number().int().positive().optional(),
+    candidateChunkCount: z.number().int().nonnegative().optional(),
+    candidateUniqueDocumentCount: z.number().int().nonnegative().optional(),
+    candidateDocumentChunkCounts: optionalDocumentChunkCountsSchema,
+    requestedFinalTopK: z.number().int().positive().optional(),
+    maxChunksPerDocument: z.number().int().positive().optional(),
+    selectedChunkCount: z.number().int().nonnegative().optional(),
+    uniqueDocumentCount: z.number().int().nonnegative().optional(),
+    maximumChunksFromSameDocument: z.number().int().nonnegative().optional(),
+    documentChunkCounts: optionalDocumentChunkCountsSchema,
     sources: z.array(ragSourceSchema).min(1),
     embeddingUsage: ragEmbeddingUsageSchema.optional()
   })
@@ -78,7 +99,8 @@ export const generationRecordSchema = z.object({
 
 export const generateRequestSchema = z.object({
   inputText: z.string().trim().min(1, "要件メモを入力してください。"),
-  ragMode: ragModeSchema.default("off")
+  ragMode: ragModeSchema.default("off"),
+  ragContextPolicy: ragContextPolicySchema.default("raw-top-k-v1")
 });
 
 export const generationHistorySchema = z.array(generationRecordSchema);
@@ -87,6 +109,7 @@ export type JiraTaskType = z.infer<typeof jiraTaskTypeSchema>;
 export type JiraTask = z.infer<typeof jiraTaskSchema>;
 export type LlmProvider = z.infer<typeof llmProviderSchema>;
 export type RagMode = z.infer<typeof ragModeSchema>;
+export type RagContextPolicy = z.infer<typeof ragContextPolicySchema>;
 export type RagSource = z.infer<typeof ragSourceSchema>;
 export type RagMetadata = z.infer<typeof ragMetadataSchema>;
 export type GenerationOutput = z.infer<typeof generationOutputSchema>;
