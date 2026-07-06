@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { generateFromRequirementMemo } from "@/lib/generator";
 import { saveGeneration, updateGenerationMetadata } from "@/lib/storage";
-import { generateRequestSchema } from "@/lib/schema";
+import { generateRequestSchema, type RagMetadata } from "@/lib/schema";
+import { getGroundedGenerationRagConfig } from "@/lib/rag/config";
+import { buildGroundedContext } from "@/lib/rag/context";
+import * as ragRetriever from "@/lib/rag/retriever";
 
 export const runtime = "nodejs";
 
@@ -45,6 +48,32 @@ export async function POST(request: Request) {
   }
 
   try {
+    let ragContextText: string | undefined;
+    let ragMetadata: RagMetadata = { mode: "off" };
+
+    if (parsedRequest.data.ragMode === "on") {
+      const ragConfig = getGroundedGenerationRagConfig();
+      const retrievalStartedAtMs = getTimerNow();
+      const retrieval = await ragRetriever.retrieveRagChunks({
+        query: parsedRequest.data.inputText,
+        strategy: ragConfig.strategy,
+        topK: ragConfig.topK
+      });
+      const retrievalLatencyMs = toNonNegativeDurationMs(retrievalStartedAtMs);
+      const groundedContext = buildGroundedContext(retrieval.results);
+
+      ragContextText = groundedContext.contextText;
+      ragMetadata = {
+        mode: "on",
+        strategy: ragConfig.strategy,
+        topK: ragConfig.topK,
+        embeddingModel: retrieval.embeddingModel,
+        retrievalLatencyMs,
+        sources: groundedContext.sources,
+        embeddingUsage: retrieval.embeddingUsage
+      };
+    }
+
     const {
       output,
       provider,
@@ -54,7 +83,9 @@ export async function POST(request: Request) {
       inputTokens,
       outputTokens,
       totalTokens
-    } = await generateFromRequirementMemo(parsedRequest.data.inputText);
+    } = await generateFromRequirementMemo(parsedRequest.data.inputText, {
+      ragContextText
+    });
 
     const record = await saveGeneration({
       id: randomUUID(),
@@ -67,6 +98,7 @@ export async function POST(request: Request) {
       inputTokens,
       outputTokens,
       totalTokens,
+      rag: ragMetadata,
       createdAt: new Date().toISOString()
     });
     const serverProcessingMs = toNonNegativeDurationMs(serverStartedAtMs);
@@ -87,6 +119,7 @@ export async function POST(request: Request) {
       inputTokens: updatedRecord.inputTokens,
       outputTokens: updatedRecord.outputTokens,
       totalTokens: updatedRecord.totalTokens,
+      rag: updatedRecord.rag,
       createdAt: updatedRecord.createdAt
     });
   } catch (error) {

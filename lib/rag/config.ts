@@ -17,6 +17,8 @@ const ragConfigSchema = z.object({
 export type RagConfig = z.infer<typeof ragConfigSchema>;
 
 export const defaultRagTopK = 5;
+export const selectedGenerationRagStrategy = "heading-aware-v1" as const;
+export const selectedGenerationRagTopK = 5;
 
 export function getEmbeddingDimension(model: string): number {
   return OPENAI_EMBEDDING_DIMENSIONS[model] ?? 1536;
@@ -44,4 +46,31 @@ export function getRagConfig(): RagConfig {
 
 export function parseRagStrategy(value: unknown): RagChunkStrategy {
   return ragChunkStrategySchema.parse(value);
+}
+
+export function getGroundedGenerationRagConfig(): {
+  strategy: typeof selectedGenerationRagStrategy;
+  topK: typeof selectedGenerationRagTopK;
+} {
+  const strategy =
+    process.env.RAG_CHUNK_STRATEGY ?? selectedGenerationRagStrategy;
+  const topK = Number.parseInt(
+    process.env.RAG_TOP_K ?? String(selectedGenerationRagTopK),
+    10
+  );
+
+  if (strategy !== selectedGenerationRagStrategy) {
+    throw new Error(
+      "Phase 1-Cでは RAG_CHUNK_STRATEGY=heading-aware-v1 を使用してください。"
+    );
+  }
+
+  if (topK !== selectedGenerationRagTopK) {
+    throw new Error("Phase 1-Cでは RAG_TOP_K=5 を使用してください。");
+  }
+
+  return {
+    strategy: selectedGenerationRagStrategy,
+    topK: selectedGenerationRagTopK
+  };
 }

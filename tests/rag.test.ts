@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/rag/search/route";
 import { chunkDocumentFixedSize, chunkDocumentHeadingAware } from "@/lib/rag/chunker";
 import { loadRagCliEnv, parseRagCliArgs } from "@/lib/rag/cli";
+import { buildGroundedContext } from "@/lib/rag/context";
 import { createOpenAiEmbeddings } from "@/lib/rag/embedding";
 import {
   evaluateRetrievedChunks,
@@ -438,6 +439,60 @@ describe("retrieval metrics", () => {
     expect(result.reciprocalRank).toBe(0);
     expect(summary.hitAtK).toBe(0);
     expect(summary.mrr).toBe(0);
+  });
+});
+
+describe("grounded generation context", () => {
+  const retrieved: RetrievedChunk[] = [
+    {
+      rank: 1,
+      score: 0.92,
+      chunkId: "profile:heading-aware-v1:0001",
+      documentId: "profile-image-spec",
+      sourcePath: "data/rag/knowledge/profile-image-spec.md",
+      documentTitle: "プロフィール画像仕様",
+      headingPath: ["プロフィール画像", "アップロード制約"],
+      content: "プロフィール画像は5MBまで、JPG/PNGのみ許可する。"
+    },
+    {
+      rank: 2,
+      score: 0.88,
+      chunkId: "cache:heading-aware-v1:0001",
+      documentId: "frontend-cache-guideline",
+      sourcePath: "data/rag/knowledge/frontend-cache-guideline.md",
+      documentTitle: "フロントエンドキャッシュ方針",
+      headingPath: ["画像反映"],
+      content: "変更後は最新URLまたはcache bustingで即時反映する。"
+    }
+  ];
+
+  it("builds deterministic source IDs and delimited context text", () => {
+    const first = buildGroundedContext(retrieved);
+    const second = buildGroundedContext(retrieved);
+
+    expect(first).toEqual(second);
+    expect(first.sources.map((source) => source.sourceId)).toEqual(["S1", "S2"]);
+    expect(first.contextText).toContain("<retrieved_product_knowledge>");
+    expect(first.contextText).toContain("</retrieved_product_knowledge>");
+    expect(first.contextText).toContain("[S1]");
+    expect(first.contextText).toContain("Document: プロフィール画像仕様");
+    expect(first.contextText).toContain(
+      "Section: プロフィール画像 > アップロード制約"
+    );
+    expect(first.contextText).toContain(
+      "Source: data/rag/knowledge/profile-image-spec.md"
+    );
+    expect(first.contextText).toContain("Content:");
+    expect(first.contextText).toContain("JPG/PNGのみ許可");
+  });
+
+  it("filters unusable chunks and fails closed when no source text remains", () => {
+    expect(() =>
+      buildGroundedContext([{ ...retrieved[0], content: "   " }])
+    ).toThrow("RAG retrieval returned no usable chunks");
+    expect(() => buildGroundedContext([])).toThrow(
+      "RAG retrieval returned no usable chunks"
+    );
   });
 });
 

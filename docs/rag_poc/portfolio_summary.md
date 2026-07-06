@@ -18,6 +18,10 @@ RAG PoC Phase 1-A / 1-Bでは、既存のLLM生成へRAGを統合する前に、
 - ingestion CLI
 - retrieval evaluation CLI
 - Hit@5 / MRR / Source Recall@5
+- `/api/generate`のRAG OFF / ON切り替え
+- retrieved context construction
+- source metadataの履歴保存とUI表示
+- retrieval失敗時のfail-closed制御
 
 ## Evaluation
 
@@ -29,5 +33,7 @@ RAG PoC Phase 1-A / 1-Bでは、既存のLLM生成へRAGを統合する前に、
 | `heading-aware-v1` | 1.000 | 1.000 | 1.000 |
 
 `heading-aware-v1`はHit@5とSource Recall@5を維持しながら、MRRを0.854から1.000へ改善した。一方で、chunk数は8から41へ増え、embedding prompt tokensは3255から4428へ増えた。ranking改善とchunk / embedding量増加のtrade-offを確認したうえで、Phase 1-Cのgrounded generationでは`heading-aware-v1`を採用する方針とした。
+
+Phase 1-Cでは、この選定済みretrieval設定を既存generation flowへ接続した。RAG OFFではretrieverを呼ばず、RAG ONでは`heading-aware-v1` / Top 5の取得sourceをcontextとして注入する。retrieval失敗や有効chunk 0件ではgeneration providerを呼ばない設計にし、retrieval failureとgeneration failureを切り分けられるようにした。
 
 この結果はsynthetic small corpusと特定PoC条件に限定される。production benchmarkやQdrant性能一般の評価とは扱わない。

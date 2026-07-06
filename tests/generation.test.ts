@@ -4,10 +4,12 @@ import path from "node:path";
 import { POST } from "@/app/api/generate/route";
 import { generateFromRequirementMemo } from "@/lib/generator";
 import { createMockGeneration } from "@/lib/mock-generator";
+import * as ragRetriever from "@/lib/rag/retriever";
 import {
   generationHistorySchema,
   generationOutputSchema,
-  generateRequestSchema
+  generateRequestSchema,
+  ragMetadataSchema
 } from "@/lib/schema";
 
 const sampleInput = `ユーザーがプロフィール画像を変更できるようにしたい。
@@ -18,7 +20,37 @@ const sampleInput = `ユーザーがプロフィール画像を変更できる�
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
+
+function getDataPath() {
+  return path.join(process.cwd(), "data", "generations.json");
+}
+
+async function withPreservedGenerationData<T>(callback: () => Promise<T>) {
+  const dataPath = getDataPath();
+  const hadDataFile = existsSync(dataPath);
+  const originalData = hadDataFile ? readFileSync(dataPath, "utf8") : "[]\n";
+
+  try {
+    return await callback();
+  } finally {
+    writeFileSync(dataPath, originalData, "utf8");
+  }
+}
+
+function sampleRetrievedChunk() {
+  return {
+    rank: 1,
+    score: 0.91,
+    chunkId: "profile-image-spec:heading-aware-v1:0001",
+    documentId: "profile-image-spec",
+    sourcePath: "data/rag/knowledge/profile-image-spec.md",
+    documentTitle: "プロフィール画像仕様",
+    headingPath: ["プロフィール画像", "アップロード制約"],
+    content: "プロフィール画像は5MBまで、JPG/PNGのみ許可する。"
+  };
+}
 
 describe("generation schema", () => {
   it("rejects empty input", () => {
@@ -48,6 +80,42 @@ describe("generation schema", () => {
     ]);
 
     expect(result.success).toBe(true);
+  });
+
+  it("defaults RAG mode to off and rejects invalid RAG mode", () => {
+    expect(generateRequestSchema.parse({ inputText: sampleInput }).ragMode).toBe(
+      "off"
+    );
+
+    const invalid = generateRequestSchema.safeParse({
+      inputText: sampleInput,
+      ragMode: "maybe"
+    });
+
+    expect(invalid.success).toBe(false);
+  });
+
+  it("accepts RAG metadata for old and grounded generation records", () => {
+    expect(ragMetadataSchema.parse({ mode: "off" }).mode).toBe("off");
+    expect(() =>
+      ragMetadataSchema.parse({
+        mode: "on",
+        strategy: "heading-aware-v1",
+        topK: 5,
+        embeddingModel: "text-embedding-3-small",
+        retrievalLatencyMs: 12,
+        sources: [
+          {
+            sourceId: "S1",
+            ...sampleRetrievedChunk()
+          }
+        ],
+        embeddingUsage: {
+          promptTokens: 10,
+          totalTokens: 10
+        }
+      })
+    ).not.toThrow();
   });
 });
 
@@ -618,12 +686,9 @@ describe("POST /api/generate", () => {
   });
 
   it("returns latency metadata for successful generation", async () => {
-    const dataPath = path.join(process.cwd(), "data", "generations.json");
-    const hadDataFile = existsSync(dataPath);
-    const originalData = hadDataFile ? readFileSync(dataPath, "utf8") : "[]\n";
     vi.stubEnv("LLM_PROVIDER", "mock");
 
-    try {
+    await withPreservedGenerationData(async () => {
       const response = await POST(
         new Request("http://localhost/api/generate", {
           method: "POST",
@@ -639,18 +704,168 @@ describe("POST /api/generate", () => {
       expect(body.providerLatencyMs).toBeGreaterThanOrEqual(0);
       expect(body.serverProcessingMs).toEqual(expect.any(Number));
       expect(body.serverProcessingMs).toBeGreaterThanOrEqual(0);
-    } finally {
-      writeFileSync(dataPath, originalData, "utf8");
-    }
+      expect(body.rag).toEqual({ mode: "off" });
+    });
+  });
+
+  it("does not run retrieval when RAG mode is off", async () => {
+    const retrieveSpy = vi.spyOn(ragRetriever, "retrieveRagChunks");
+    vi.stubEnv("LLM_PROVIDER", "mock");
+
+    await withPreservedGenerationData(async () => {
+      const response = await POST(
+        new Request("http://localhost/api/generate", {
+          method: "POST",
+          body: JSON.stringify({ inputText: sampleInput, ragMode: "off" })
+        })
+      );
+
+      expect(response.status).toBe(200);
+      expect(retrieveSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  it("returns RAG source metadata when RAG mode is on", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mock");
+    const retrieveSpy = vi
+      .spyOn(ragRetriever, "retrieveRagChunks")
+      .mockResolvedValueOnce({
+        query: sampleInput,
+        strategy: "heading-aware-v1",
+        topK: 5,
+        embeddingModel: "text-embedding-3-small",
+        embeddingUsage: {
+          promptTokens: 20,
+          totalTokens: 20
+        },
+        results: [sampleRetrievedChunk()]
+      });
+
+    await withPreservedGenerationData(async () => {
+      const response = await POST(
+        new Request("http://localhost/api/generate", {
+          method: "POST",
+          body: JSON.stringify({ inputText: sampleInput, ragMode: "on" })
+        })
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(retrieveSpy).toHaveBeenCalledWith({
+        query: sampleInput,
+        strategy: "heading-aware-v1",
+        topK: 5
+      });
+      expect(body.rag).toMatchObject({
+        mode: "on",
+        strategy: "heading-aware-v1",
+        topK: 5,
+        embeddingModel: "text-embedding-3-small",
+        embeddingUsage: {
+          promptTokens: 20,
+          totalTokens: 20
+        }
+      });
+      expect(body.rag.retrievalLatencyMs).toEqual(expect.any(Number));
+      expect(body.rag.sources[0]).toMatchObject({
+        sourceId: "S1",
+        documentId: "profile-image-spec",
+        rank: 1
+      });
+      expect(body.rag.sources[0].vector).toBeUndefined();
+    });
+  });
+
+  it("fails closed without provider generation when RAG retrieval fails", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openai");
+    vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(ragRetriever, "retrieveRagChunks").mockRejectedValueOnce(
+      new Error("Qdrant unavailable")
+    );
+
+    const response = await POST(
+      new Request("http://localhost/api/generate", {
+        method: "POST",
+        body: JSON.stringify({ inputText: sampleInput, ragMode: "on" })
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body.error).toContain("Qdrant unavailable");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed without provider generation when RAG returns no chunks", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openai");
+    vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(ragRetriever, "retrieveRagChunks").mockResolvedValueOnce({
+      query: sampleInput,
+      strategy: "heading-aware-v1",
+      topK: 5,
+      embeddingModel: "text-embedding-3-small",
+      results: []
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/generate", {
+        method: "POST",
+        body: JSON.stringify({ inputText: sampleInput, ragMode: "on" })
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body.error).toContain("RAG retrieval returned no usable chunks");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid RAG mode before retrieval", async () => {
+    const retrieveSpy = vi.spyOn(ragRetriever, "retrieveRagChunks");
+
+    const response = await POST(
+      new Request("http://localhost/api/generate", {
+        method: "POST",
+        body: JSON.stringify({ inputText: sampleInput, ragMode: "bad" })
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(retrieveSpy).not.toHaveBeenCalled();
   });
 });
 
 describe("generation UI", () => {
   it("contains client elapsed latency display wiring", () => {
     const pageSource = readFileSync(path.join(process.cwd(), "app", "page.tsx"), "utf8");
+    const cssSource = readFileSync(
+      path.join(process.cwd(), "app", "globals.css"),
+      "utf8"
+    );
 
     expect(pageSource).toContain("clientElapsedMs");
     expect(pageSource).toContain("performance.now()");
     expect(pageSource).toContain("Client elapsed");
+    expect(pageSource).toContain("ragMode");
+    expect(pageSource).toContain("Retrieved Sources");
+    expect(pageSource).toContain('setRagMode("on")');
+    expect(pageSource).toContain('className="summary-content"');
+    expect(pageSource).toContain('meta?.rag ?? { mode: "off" as const }');
+    expect(pageSource).toContain('rag.mode === "on" ? <SourceList sources={rag.sources} /> : null');
+    expect(pageSource).toContain("Embedding");
+    expect(pageSource).toContain("Embedding tokens");
+    expect(pageSource).toContain("rag.embeddingModel");
+    expect(pageSource).toContain("rag.embeddingUsage?.promptTokens");
+    expect(pageSource).toContain("sources.map");
+    expect(cssSource).toContain(
+      "grid-template-columns: minmax(320px, 1fr) minmax(360px, 1.1fr);"
+    );
+    expect(cssSource).toContain("grid-template-columns: repeat(2, minmax(150px, 1fr));");
+    expect(cssSource).toContain(".summary-content");
+    expect(cssSource).not.toContain("grid-template-columns: minmax(0, 1fr) auto;");
   });
 });

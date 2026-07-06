@@ -1,7 +1,14 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import type { GenerationOutput, GenerationRecord, JiraTaskType } from "@/lib/schema";
+import type {
+  GenerationOutput,
+  GenerationRecord,
+  JiraTaskType,
+  RagMetadata,
+  RagMode,
+  RagSource
+} from "@/lib/schema";
 
 type GeneratedResponse = GenerationOutput & {
   id: string;
@@ -15,6 +22,7 @@ type GeneratedResponse = GenerationOutput & {
   outputTokens?: number;
   totalTokens?: number;
   clientElapsedMs?: number;
+  rag?: RagMetadata;
 };
 
 const sampleInput = `ユーザーがプロフィール画像を変更できるようにしたい。
@@ -58,6 +66,56 @@ function formatNumber(value?: number) {
   return value.toLocaleString("ja-JP");
 }
 
+function formatScore(value: number) {
+  if (!Number.isFinite(value)) {
+    return "N/A";
+  }
+
+  return value.toFixed(3);
+}
+
+function SourceList({ sources }: { sources: RagSource[] }) {
+  return (
+    <section className="result-block source-block">
+      <h3>Retrieved Sources</h3>
+      <div className="source-list">
+        {sources.map((source) => (
+          <details key={source.sourceId} className="source-item">
+            <summary>
+              <span className="source-id">{source.sourceId}</span>
+              <span className="source-title">{source.documentTitle}</span>
+              <span className="source-score">score {formatScore(source.score)}</span>
+            </summary>
+            <dl className="source-meta">
+              <div>
+                <dt>Rank</dt>
+                <dd>{source.rank}</dd>
+              </div>
+              <div>
+                <dt>Chunk</dt>
+                <dd>{source.chunkId}</dd>
+              </div>
+              <div>
+                <dt>Document</dt>
+                <dd>{source.documentId}</dd>
+              </div>
+              <div>
+                <dt>Section</dt>
+                <dd>{source.headingPath.length > 0 ? source.headingPath.join(" > ") : "N/A"}</dd>
+              </div>
+              <div>
+                <dt>Source</dt>
+                <dd>{source.sourcePath}</dd>
+              </div>
+            </dl>
+            <p className="source-content">{source.content}</p>
+          </details>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function ResultView({
   output,
   meta
@@ -74,18 +132,21 @@ function ResultView({
     | "inputTokens"
     | "outputTokens"
     | "totalTokens"
+    | "rag"
   > & {
     clientElapsedMs?: number;
   };
 }) {
+  const rag = meta?.rag ?? { mode: "off" as const };
+
   return (
     <div className="result-grid">
       <section className="summary-panel">
-        <div>
+        <div className="summary-content">
           <p className="eyebrow">Summary</p>
           <h2>要約</h2>
+          <p>{output.summary}</p>
         </div>
-        <p>{output.summary}</p>
         {meta ? (
           <dl className="meta-list">
             <div>
@@ -128,9 +189,41 @@ function ResultView({
               <dt>Total tokens</dt>
               <dd>{formatNumber(meta.totalTokens)}</dd>
             </div>
+            <div>
+              <dt>RAG</dt>
+              <dd>{rag.mode === "on" ? "ON" : "OFF"}</dd>
+            </div>
+            {rag.mode === "on" ? (
+              <>
+                <div>
+                  <dt>Strategy</dt>
+                  <dd>{rag.strategy}</dd>
+                </div>
+                <div>
+                  <dt>Top K</dt>
+                  <dd>{rag.topK}</dd>
+                </div>
+                <div>
+                  <dt>Retrieval</dt>
+                  <dd>{formatDuration(rag.retrievalLatencyMs)}</dd>
+                </div>
+                <div>
+                  <dt>Embedding</dt>
+                  <dd>{rag.embeddingModel}</dd>
+                </div>
+                {rag.embeddingUsage?.promptTokens ? (
+                  <div>
+                    <dt>Embedding tokens</dt>
+                    <dd>{formatNumber(rag.embeddingUsage.promptTokens)}</dd>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
           </dl>
         ) : null}
       </section>
+
+      {rag.mode === "on" ? <SourceList sources={rag.sources} /> : null}
 
       <ListSection title="仕様" items={output.spec} />
       <ListSection title="受け入れ条件" items={output.acceptanceCriteria} />
@@ -159,6 +252,7 @@ function ResultView({
 
 export default function Home() {
   const [inputText, setInputText] = useState(sampleInput);
+  const [ragMode, setRagMode] = useState<RagMode>("off");
   const [result, setResult] = useState<GeneratedResponse | null>(null);
   const [history, setHistory] = useState<GenerationRecord[]>([]);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
@@ -216,7 +310,7 @@ export default function Home() {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ inputText })
+        body: JSON.stringify({ inputText, ragMode })
       });
       const data = await response.json();
 
@@ -249,7 +343,8 @@ export default function Home() {
         serverProcessingMs: selectedHistory.serverProcessingMs,
         inputTokens: selectedHistory.inputTokens,
         outputTokens: selectedHistory.outputTokens,
-        totalTokens: selectedHistory.totalTokens
+        totalTokens: selectedHistory.totalTokens,
+        rag: selectedHistory.rag
       }
     : result
       ? {
@@ -262,6 +357,7 @@ export default function Home() {
           inputTokens: result.inputTokens,
           outputTokens: result.outputTokens,
           totalTokens: result.totalTokens,
+          rag: result.rag,
           clientElapsedMs: result.clientElapsedMs
         }
       : undefined;
@@ -301,6 +397,30 @@ export default function Home() {
               placeholder="実現したい機能や制約、失敗時の挙動を入力してください。"
               aria-label="要件メモ"
             />
+            <div className="rag-control" aria-label="RAG mode">
+              <div>
+                <p className="control-label">RAG</p>
+                <p className="control-help">
+                  heading-aware-v1 / Top 5
+                </p>
+              </div>
+              <div className="segmented-control">
+                <button
+                  className={ragMode === "off" ? "segment active" : "segment"}
+                  type="button"
+                  onClick={() => setRagMode("off")}
+                >
+                  OFF
+                </button>
+                <button
+                  className={ragMode === "on" ? "segment active" : "segment"}
+                  type="button"
+                  onClick={() => setRagMode("on")}
+                >
+                  ON
+                </button>
+              </div>
+            </div>
             {error ? <p className="error-message">{error}</p> : null}
             <button className="primary-button" type="submit" disabled={isLoading}>
               {isLoading ? "生成中..." : "生成する"}
@@ -336,6 +456,9 @@ export default function Home() {
                 onClick={() => setSelectedHistoryId(record.id)}
               >
                 <span>{record.output.summary}</span>
+                <span className={record.rag?.mode === "on" ? "history-rag on" : "history-rag"}>
+                  RAG {record.rag?.mode === "on" ? "ON" : "OFF"}
+                </span>
                 <time>{new Date(record.createdAt).toLocaleString("ja-JP")}</time>
               </button>
             ))}

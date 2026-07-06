@@ -134,6 +134,8 @@ Codexなどのネットワーク制限付き実行環境から `npm run dev` を
 - `GET /api/generations` と `GET /api/generations/:id` による履歴参照
 - 生成結果と履歴詳細の画面表示
 - 生成履歴でのprovider/modelName保存と画面表示
+- RAG OFF / ON切り替えによるgrounded generation
+- RAG ON時のretrieved source metadata保存と画面表示
 
 ## 履歴データの扱い
 
@@ -199,15 +201,18 @@ npm run test:e2e
 - [LLMアプリ開発PoC ポートフォリオ要約](docs/llm_app_poc/portfolio_summary.md)
 - [追加サンプル入力案](docs/llm_app_poc/sample_inputs.md)
 
-## RAG PoC Phase 1-A
+## RAG PoC Phase 1-A / 1-C
 
 RAG PoC Phase 1-Aでは、既存 `/api/generate` へRAG contextを注入せず、retrieval単体をQdrantで観測・評価できる状態にしています。
+
+Phase 1-Cでは、Phase 1-A / 1-Bで選定した `heading-aware-v1` / Top 5 を既存 `/api/generate` に接続し、画面からRAG OFF / ONを切り替えられるようにしています。RAG OFFではretriever、OpenAI Embeddings、Qdrantを呼びません。RAG ONではretrieval成功後にのみgeneration providerへ進み、retrieval失敗または有効chunk 0件の場合はfail-closedで生成を止めます。
 
 参照資料:
 
 - [RAG PoC Qdrant仕様](docs/rag_poc/rag_poc_spec_v0_2_qdrant.md)
 - [RAG PoC 評価設計](docs/rag_poc/rag_poc_evaluation_v0_1.md)
 - [RAG PoC Retrieval評価結果](docs/rag_poc/retrieval_evaluation_results.md)
+- [RAG PoC Grounded Generation設計](docs/rag_poc/grounded_generation_design.md)
 - [RAG PoC ポートフォリオ要約](docs/rag_poc/portfolio_summary.md)
 - [RAG Retrieval Foundation task](docs/rag_poc/codex_task_01_rag_retrieval_foundation_qdrant.md)
 
@@ -225,6 +230,8 @@ RAG_EMBEDDING_PROVIDER=openai
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 QDRANT_URL=http://localhost:6333
 QDRANT_API_KEY=
+RAG_CHUNK_STRATEGY=heading-aware-v1
+RAG_TOP_K=5
 ```
 
 ingestion:
@@ -242,6 +249,8 @@ npm run rag:evaluate:heading
 ```
 
 Phase 1-A / 1-Bの実測では、`heading-aware-v1` がHit@5 1.000、MRR 1.000、Source Recall@5 1.000となり、`fixed-size-v1`のMRR 0.854から改善した。Phase 1-Cのgrounded generationでは `heading-aware-v1` を使用する方針です。
+
+RAG ONでgrounded generationを確認する場合は、通常のローカルPowerShellでQdrantとdev serverを起動し、画面のRAG切り替えをONにします。Codexなどのネットワーク制限付き実行環境では、OpenAI Embeddings APIやQdrant実体への接続を成功したものとして扱わないでください。
 
 debug API:
 

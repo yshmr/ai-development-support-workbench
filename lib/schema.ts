@@ -14,6 +14,41 @@ export const jiraTaskSchema = z.object({
 });
 
 export const llmProviderSchema = z.enum(["mock", "openai", "gemini", "anthropic"]);
+export const ragModeSchema = z.enum(["off", "on"]);
+
+const optionalNonNegativeNumberSchema = z.number().nonnegative().optional();
+
+const ragSourceSchema = z.object({
+  sourceId: z.string().min(1),
+  rank: z.number().int().positive(),
+  score: z.number(),
+  chunkId: z.string().min(1),
+  documentId: z.string().min(1),
+  documentTitle: z.string().min(1),
+  headingPath: z.array(z.string().min(1)),
+  sourcePath: z.string().min(1),
+  content: z.string().min(1)
+});
+
+const ragEmbeddingUsageSchema = z.object({
+  promptTokens: optionalNonNegativeNumberSchema,
+  totalTokens: optionalNonNegativeNumberSchema
+});
+
+export const ragMetadataSchema = z.discriminatedUnion("mode", [
+  z.object({
+    mode: z.literal("off")
+  }),
+  z.object({
+    mode: z.literal("on"),
+    strategy: z.literal("heading-aware-v1"),
+    topK: z.literal(5),
+    embeddingModel: z.string().min(1),
+    retrievalLatencyMs: optionalNonNegativeNumberSchema,
+    sources: z.array(ragSourceSchema).min(1),
+    embeddingUsage: ragEmbeddingUsageSchema.optional()
+  })
+]);
 
 export const generationOutputSchema = z.object({
   summary: z.string().min(1),
@@ -24,8 +59,6 @@ export const generationOutputSchema = z.object({
   reviewPoints: z.array(z.string().min(1)).min(1),
   risks: z.array(z.string().min(1)).min(1)
 });
-
-const optionalNonNegativeNumberSchema = z.number().nonnegative().optional();
 
 export const generationRecordSchema = z.object({
   id: z.string().min(1),
@@ -39,11 +72,13 @@ export const generationRecordSchema = z.object({
   inputTokens: optionalNonNegativeNumberSchema,
   outputTokens: optionalNonNegativeNumberSchema,
   totalTokens: optionalNonNegativeNumberSchema,
+  rag: ragMetadataSchema.optional(),
   createdAt: z.string().datetime()
 });
 
 export const generateRequestSchema = z.object({
-  inputText: z.string().trim().min(1, "要件メモを入力してください。")
+  inputText: z.string().trim().min(1, "要件メモを入力してください。"),
+  ragMode: ragModeSchema.default("off")
 });
 
 export const generationHistorySchema = z.array(generationRecordSchema);
@@ -51,6 +86,9 @@ export const generationHistorySchema = z.array(generationRecordSchema);
 export type JiraTaskType = z.infer<typeof jiraTaskTypeSchema>;
 export type JiraTask = z.infer<typeof jiraTaskSchema>;
 export type LlmProvider = z.infer<typeof llmProviderSchema>;
+export type RagMode = z.infer<typeof ragModeSchema>;
+export type RagSource = z.infer<typeof ragSourceSchema>;
+export type RagMetadata = z.infer<typeof ragMetadataSchema>;
 export type GenerationOutput = z.infer<typeof generationOutputSchema>;
 export type GenerationRecord = z.infer<typeof generationRecordSchema>;
 export type GenerateRequest = z.infer<typeof generateRequestSchema>;

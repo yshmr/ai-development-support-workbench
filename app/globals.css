@@ -181,6 +181,57 @@ textarea:focus {
   font-weight: 700;
 }
 
+.rag-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: #fbfcfd;
+}
+
+.control-label,
+.control-help {
+  margin: 0;
+}
+
+.control-label {
+  font-weight: 700;
+}
+
+.control-help {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.segmented-control {
+  display: grid;
+  grid-template-columns: repeat(2, 64px);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.segment {
+  min-height: 38px;
+  border: 0;
+  color: var(--muted);
+  background: var(--surface);
+  font-weight: 700;
+}
+
+.segment + .segment {
+  border-left: 1px solid var(--line);
+}
+
+.segment.active {
+  color: #ffffff;
+  background: var(--primary);
+}
+
 .history-list {
   display: grid;
   gap: 10px;
@@ -219,6 +270,23 @@ textarea:focus {
   font-size: 0.82rem;
 }
 
+.history-rag {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.history-rag.on {
+  color: #ffffff;
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
 .empty-text,
 .empty-output {
   margin: 0;
@@ -241,6 +309,10 @@ textarea:focus {
   grid-column: 1 / -1;
 }
 
+.source-block {
+  grid-column: 1 / -1;
+}
+
 .summary-panel,
 .result-block {
   padding: 18px;
@@ -249,27 +321,38 @@ textarea:focus {
 
 .summary-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(320px, 1fr) minmax(360px, 1.1fr);
   gap: 18px;
+  align-items: start;
   background: var(--surface-strong);
 }
 
-.summary-panel p {
+.summary-content {
+  min-width: 0;
+}
+
+.summary-content p {
   margin: 0;
   line-height: 1.7;
 }
 
 .meta-list {
   display: grid;
+  grid-template-columns: repeat(2, minmax(150px, 1fr));
   gap: 8px;
-  min-width: 230px;
+  min-width: 0;
   margin: 0;
 }
 
 .meta-list div {
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid rgba(99, 112, 131, 0.16);
+  border-radius: 6px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.52);
 }
 
 .meta-list dt {
@@ -295,6 +378,84 @@ textarea:focus {
   margin: 0;
   padding-left: 20px;
   line-height: 1.7;
+}
+
+.source-list {
+  display: grid;
+  gap: 10px;
+}
+
+.source-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfcfd;
+}
+
+.source-item summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.source-id {
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: #ffffff;
+  background: var(--primary-dark);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.source-title,
+.source-score {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.source-title {
+  font-weight: 700;
+}
+
+.source-score {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.source-meta {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0 12px 12px;
+}
+
+.source-meta div {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.source-meta dt {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.source-meta dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.source-content {
+  margin: 0;
+  border-top: 1px solid var(--line);
+  padding: 12px;
+  color: var(--text);
+  background: var(--surface);
+  line-height: 1.7;
+  white-space: pre-wrap;
 }
 
 .task-list {
@@ -368,6 +529,7 @@ textarea:focus {
   }
 
   .meta-list {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
     min-width: 0;
   }
 }
@@ -391,8 +553,23 @@ textarea:focus {
   }
 
   .ghost-button,
-  .primary-button {
+  .primary-button,
+  .rag-control {
     width: 100%;
+  }
+
+  .rag-control {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .source-item summary {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .meta-list {
+    grid-template-columns: 1fr;
   }
 
   .app-header h1 {

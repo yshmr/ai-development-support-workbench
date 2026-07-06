@@ -1,5 +1,5 @@
 import { defaultRagTopK, getRagConfig } from "./config";
-import { createOpenAiQueryEmbedding } from "./embedding";
+import { createOpenAiQueryEmbedding, type EmbeddingUsage } from "./embedding";
 import { createRagQdrantClient, queryRagChunks } from "./qdrant";
 import {
   retrieveInputSchema,
@@ -12,6 +12,7 @@ export type RetrieveResult = {
   strategy: RagChunkStrategy;
   topK: number;
   embeddingModel: string;
+  embeddingUsage?: EmbeddingUsage;
   results: RetrievedChunk[];
 };
 
@@ -40,6 +41,7 @@ export async function retrieveRagChunks(input: {
     strategy: parsedInput.strategy,
     topK: parsedInput.topK,
     embeddingModel: config.embeddingModel,
+    embeddingUsage: embedding.usage,
     results
   };
 }
