@@ -36,4 +36,8 @@ RAG PoC Phase 1-A / 1-Bでは、既存のLLM生成へRAGを統合する前に、
 
 Phase 1-Cでは、この選定済みretrieval設定を既存generation flowへ接続した。RAG OFFではretrieverを呼ばず、RAG ONでは`heading-aware-v1` / Top 5の取得sourceをcontextとして注入する。retrieval失敗や有効chunk 0件ではgeneration providerを呼ばない設計にし、retrieval failureとgeneration failureを切り分けられるようにした。
 
+Phase 1-Dでは、`openai` / `gpt-5.4-mini`、`llm-app-poc-rag-v1`、同一入力、同一schemaでRAG OFF / ONを各3Run比較した。Direct comparisonでは両modeに共通して適用できる5軸を使い、RAG OFFは3.9 / 5、RAG ONは4.6 / 5だった。RAG ONでは`POST /api/profile/image`、`multipart/form-data`、`image` field、latest profile image URL、validation messageなどのsource-grounded ruleが増えた。RAG-specific grounding axesは別枠で評価し、source coverageとgeneration coverageを対応付けてfailure domainを分離した。
+
+一方で、RAG ONのTop 5は3Runとも`profile-image-spec`が3slot、`error-message-guideline`が1slot、`profile-api`が1slotで、uniqueDocumentCount@5は3だった。無関係なdistractorは入らなかったが、same-document duplicate chunksにより`frontend-cache-guideline`、`media-upload-security`、`storage-lifecycle`はcontextから外れた。これにより、retrieval hit/rankだけでなくTop-K context compositionとgeneration coverageを分けて評価する必要があることを確認した。
+
 この結果はsynthetic small corpusと特定PoC条件に限定される。production benchmarkやQdrant性能一般の評価とは扱わない。
