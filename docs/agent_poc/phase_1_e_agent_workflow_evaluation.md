@@ -237,17 +237,9 @@ If parity differs, the evaluation report should describe the difference rather t
 
 ## Formal Results
 
-TBD after formal local run and blind manual scoring.
+Formal evaluation results are recorded separately to keep this protocol stable:
 
-Placeholders:
-
-- Agent OFF quality mean: TBD
-- Agent ON quality mean: TBD
-- paired win/tie/loss: TBD
-- Agent workflow completion rate: TBD
-- revision invocation rate: TBD
-- latency comparison: TBD
-- token usage comparison: TBD
+- [Phase 1-E evaluation results](phase_1_e_agent_workflow_evaluation_results.md)
 
 ## Security Notes
 

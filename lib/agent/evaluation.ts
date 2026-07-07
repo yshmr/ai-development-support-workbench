@@ -117,7 +117,7 @@ export const manualQualityScoreSchema = z.object({
 export const manualScoreEntrySchema = z.object({
   sampleId: z.string().regex(/^SAMPLE-\d{3}$/),
   scores: manualQualityScoreSchema,
-  notes: z.string().optional()
+  notes: z.union([z.string(), z.array(z.string())]).optional()
 });
 
 export const manualScoresFileSchema = z.object({

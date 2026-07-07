@@ -547,6 +547,49 @@ describe("Agent workflow orchestrator", () => {
     expect(result.metadata.llmStepCount).toBe(0);
   });
 
+  it("records wall-clock step timestamps separately from monotonic latency", async () => {
+    const { dependencies } = createDependencies();
+    let elapsedMs = 100;
+    let wallClockMs = Date.parse("2026-07-07T12:00:00.000Z");
+
+    vi.stubGlobal("performance", {
+      now: vi.fn(() => {
+        const currentElapsedMs = elapsedMs;
+        elapsedMs += 25;
+        return currentElapsedMs;
+      })
+    });
+    vi.spyOn(Date, "now").mockImplementation(() => {
+      const currentWallClockMs = wallClockMs;
+      wallClockMs += 1000;
+      return currentWallClockMs;
+    });
+
+    const result = await runAgentWorkflow({
+      requirementMemo,
+      dependencies
+    });
+    const firstStep = result.metadata.steps[0];
+
+    expect(result.metadata.steps.map((step) => step.stepName)).toEqual([
+      "planning",
+      "knowledge_retrieval",
+      "draft_generation",
+      "review",
+      "finalization"
+    ]);
+    expect(firstStep.startedAt).toBe("2026-07-07T12:00:00.000Z");
+    expect(firstStep.completedAt).toBe("2026-07-07T12:00:01.000Z");
+    expect(firstStep.latencyMs).toBe(25);
+    expect(firstStep.startedAt).not.toMatch(/^1970-01-01/);
+    expect(
+      result.metadata.steps.every(
+        (step) => Date.parse(step.completedAt) >= Date.parse(step.startedAt)
+      )
+    ).toBe(true);
+    expect(result.metadata.steps.map((step) => step.sequence)).toEqual([1, 2, 3, 4, 5]);
+  });
+
   it("records revision path step trace in order and does not retrieve twice", async () => {
     const { dependencies, knowledgeTool } = createDependencies({
       reviews: [review([finding("major")]), review()]

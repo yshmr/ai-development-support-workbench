@@ -105,7 +105,7 @@ class AgentWorkflowRuntimeError extends Error {
   }
 }
 
-function getTimerNow(): number {
+function getElapsedTimerNow(): number {
   try {
     return globalThis.performance?.now?.() ?? Date.now();
   } catch {
@@ -113,7 +113,14 @@ function getTimerNow(): number {
   }
 }
 
-function toNonNegativeDurationMs(startMs: number, endMs = getTimerNow()): number {
+function getWallClockNow(): number {
+  return Date.now();
+}
+
+function toNonNegativeDurationMs(
+  startMs: number,
+  endMs = getElapsedTimerNow()
+): number {
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
     return 0;
   }
@@ -249,7 +256,7 @@ export async function runAgentWorkflow({
 }: RunAgentWorkflowInput): Promise<AgentRunResult> {
   const runId = randomUUID();
   const createdAt = new Date().toISOString();
-  const runStartedAtMs = getTimerNow();
+  const runStartedAtMs = getElapsedTimerNow();
   const steps: AgentStepTrace[] = [];
   const reviews: AgentReview[] = [];
   const reviewHistory: AgentReviewHistoryEntry[] = [];
@@ -315,13 +322,14 @@ export async function runAgentWorkflow({
     operation: () => MaybePromise<unknown | AgentExecutorResult<unknown>>,
     parseResult: (value: unknown) => T
   ): Promise<T> => {
-    const startedAtMs = getTimerNow();
+    const startedAtMs = getElapsedTimerNow();
+    const startedAtWallClockMs = getWallClockNow();
     const trace: AgentStepTrace = {
       stepId: randomUUID(),
       stepName,
       sequence: steps.length + 1,
-      startedAt: toIsoString(startedAtMs),
-      completedAt: toIsoString(startedAtMs),
+      startedAt: toIsoString(startedAtWallClockMs),
+      completedAt: toIsoString(startedAtWallClockMs),
       latencyMs: 0,
       status: "completed"
     };
@@ -338,8 +346,8 @@ export async function runAgentWorkflow({
         isAgentExecutorResult(rawResult) ? rawResult.metadata : undefined
       );
       const parsedResult = parseResult(result);
-      const completedAtMs = getTimerNow();
-      trace.completedAt = toIsoString(completedAtMs);
+      const completedAtMs = getElapsedTimerNow();
+      trace.completedAt = toIsoString(getWallClockNow());
       trace.latencyMs = toNonNegativeDurationMs(startedAtMs, completedAtMs);
       steps.push(trace);
 
@@ -350,8 +358,8 @@ export async function runAgentWorkflow({
       activeStepName = undefined;
       return parsedResult;
     } catch (error) {
-      const completedAtMs = getTimerNow();
-      trace.completedAt = toIsoString(completedAtMs);
+      const completedAtMs = getElapsedTimerNow();
+      trace.completedAt = toIsoString(getWallClockNow());
       trace.latencyMs = toNonNegativeDurationMs(startedAtMs, completedAtMs);
       trace.status = "failed";
       steps.push(trace);

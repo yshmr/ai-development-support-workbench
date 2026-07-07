@@ -419,6 +419,28 @@ describe("Agent Phase 1-E raw and blind bundle behavior", () => {
         ]
       })
     ).toThrow();
+    expect(() =>
+      manualScoresFileSchema.parse({
+        ...validScores,
+        scores: [
+          {
+            ...validScores.scores[0],
+            notes: "single reviewer note"
+          }
+        ]
+      })
+    ).not.toThrow();
+    expect(() =>
+      manualScoresFileSchema.parse({
+        ...validScores,
+        scores: [
+          {
+            ...validScores.scores[0],
+            notes: ["first reviewer note", "second reviewer note"]
+          }
+        ]
+      })
+    ).not.toThrow();
   });
 
   it("aggregates quality, Agent metrics, retrieval parity, latency, usage, and revision pairs", async () => {
