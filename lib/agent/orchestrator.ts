@@ -26,6 +26,24 @@ const maxReviewCount = maxRevisionCount + 1;
 
 type MaybePromise<T> = T | Promise<T>;
 
+export type AgentExecutorStepMetadata = Pick<
+  AgentStepTrace,
+  | "provider"
+  | "modelName"
+  | "promptVersion"
+  | "providerBacked"
+  | "providerLatencyMs"
+  | "inputTokens"
+  | "outputTokens"
+  | "totalTokens"
+>;
+
+export type AgentExecutorResult<T> = {
+  __agentExecutorResult: true;
+  data: T;
+  metadata?: AgentExecutorStepMetadata;
+};
+
 export type AgentPlanner = {
   plan(input: { requirementMemo: string }): MaybePromise<unknown>;
 };
@@ -98,13 +116,26 @@ function toIsoString(timestampMs: number): string {
   return new Date(timestampMs).toISOString();
 }
 
-function isLlmStep(stepName: AgentStepName): boolean {
+function isAgentExecutorResult<T>(
+  value: T | AgentExecutorResult<T>
+): value is AgentExecutorResult<T> {
   return (
-    stepName === "planning" ||
-    stepName === "draft_generation" ||
-    stepName === "review" ||
-    stepName === "revision"
+    typeof value === "object" &&
+    value !== null &&
+    "__agentExecutorResult" in value &&
+    (value as { __agentExecutorResult?: unknown }).__agentExecutorResult === true
   );
+}
+
+export function createAgentExecutorResult<T>(
+  data: T,
+  metadata?: AgentExecutorStepMetadata
+): AgentExecutorResult<T> {
+  return {
+    __agentExecutorResult: true,
+    data,
+    metadata
+  };
 }
 
 function isUsableKnowledge(result: KnowledgeRetrievalToolResult): boolean {
@@ -167,9 +198,51 @@ export async function runAgentWorkflow({
     state = transitionAgentState(state, nextState);
   };
 
+  const applyStepMetadata = (
+    trace: AgentStepTrace,
+    metadata?: AgentExecutorStepMetadata
+  ) => {
+    if (!metadata) {
+      return;
+    }
+
+    if (metadata.provider !== undefined) {
+      trace.provider = metadata.provider;
+    }
+
+    if (metadata.modelName !== undefined) {
+      trace.modelName = metadata.modelName;
+    }
+
+    if (metadata.promptVersion !== undefined) {
+      trace.promptVersion = metadata.promptVersion;
+    }
+
+    if (metadata.providerBacked !== undefined) {
+      trace.providerBacked = metadata.providerBacked;
+    }
+
+    if (metadata.providerLatencyMs !== undefined) {
+      trace.providerLatencyMs = metadata.providerLatencyMs;
+    }
+
+    if (metadata.inputTokens !== undefined) {
+      trace.inputTokens = metadata.inputTokens;
+    }
+
+    if (metadata.outputTokens !== undefined) {
+      trace.outputTokens = metadata.outputTokens;
+    }
+
+    if (metadata.totalTokens !== undefined) {
+      trace.totalTokens = metadata.totalTokens;
+    }
+  };
+
   const runStep = async <T>(
     stepName: AgentStepName,
-    operation: () => MaybePromise<T>
+    operation: () => MaybePromise<unknown | AgentExecutorResult<unknown>>,
+    parseResult: (value: unknown) => T
   ): Promise<T> => {
     const startedAtMs = getTimerNow();
     const trace: AgentStepTrace = {
@@ -185,18 +258,26 @@ export async function runAgentWorkflow({
     activeStepName = stepName;
 
     try {
-      const result = await operation();
+      const rawResult = await operation();
+      const result = isAgentExecutorResult(rawResult)
+        ? rawResult.data
+        : rawResult;
+      applyStepMetadata(
+        trace,
+        isAgentExecutorResult(rawResult) ? rawResult.metadata : undefined
+      );
+      const parsedResult = parseResult(result);
       const completedAtMs = getTimerNow();
       trace.completedAt = toIsoString(completedAtMs);
       trace.latencyMs = toNonNegativeDurationMs(startedAtMs, completedAtMs);
       steps.push(trace);
 
-      if (isLlmStep(stepName)) {
+      if (trace.providerBacked === true) {
         llmStepCount += 1;
       }
 
       activeStepName = undefined;
-      return result;
+      return parsedResult;
     } catch (error) {
       const completedAtMs = getTimerNow();
       trace.completedAt = toIsoString(completedAtMs);
@@ -204,7 +285,7 @@ export async function runAgentWorkflow({
       trace.status = "failed";
       steps.push(trace);
 
-      if (isLlmStep(stepName)) {
+      if (trace.providerBacked === true) {
         llmStepCount += 1;
       }
 
@@ -218,13 +299,14 @@ export async function runAgentWorkflow({
     terminationReason: "review_passed" | "revision_limit_reached"
   ): Promise<AgentRunResult> => {
     transitionTo("finalizing");
-    await runStep("finalization", () => undefined);
+    await runStep("finalization", () => undefined, () => undefined);
     transitionTo(finalStatus);
 
     return {
       output: currentOutput,
       initialDraft,
       plan,
+      knowledge,
       reviews,
       metadata: createMetadata({
         status: finalStatus,
@@ -249,6 +331,7 @@ export async function runAgentWorkflow({
       output: currentOutput,
       initialDraft,
       plan,
+      knowledge,
       reviews,
       metadata: createMetadata({
         status: "failed",
@@ -270,53 +353,59 @@ export async function runAgentWorkflow({
 
   try {
     transitionTo("planning");
-    plan = await runStep("planning", async () =>
-      agentPlanSchema.parse(
-        await dependencies.planner.plan({ requirementMemo })
-      )
+    plan = await runStep(
+      "planning",
+      async () => dependencies.planner.plan({ requirementMemo }),
+      (value) => agentPlanSchema.parse(value)
     );
 
     transitionTo("retrieving");
-    knowledge = await runStep("knowledge_retrieval", async () => {
-      toolInvocationCount += 1;
-      const parsedKnowledge = knowledgeRetrievalToolResultSchema.parse(
-        await dependencies.knowledgeTool.invoke({ query: requirementMemo })
-      );
+    knowledge = await runStep(
+      "knowledge_retrieval",
+      async () => {
+        toolInvocationCount += 1;
+        return dependencies.knowledgeTool.invoke({ query: requirementMemo });
+      },
+      (value) => {
+        const parsedKnowledge = knowledgeRetrievalToolResultSchema.parse(value);
 
-      if (!isUsableKnowledge(parsedKnowledge)) {
-        throw new AgentWorkflowRuntimeError(
-          "Knowledge Retrieval Tool returned zero usable knowledge.",
-          "knowledge_retrieval"
-        );
+        if (!isUsableKnowledge(parsedKnowledge)) {
+          throw new AgentWorkflowRuntimeError(
+            "Knowledge Retrieval Tool returned zero usable knowledge.",
+            "knowledge_retrieval"
+          );
+        }
+
+        return parsedKnowledge;
       }
-
-      return parsedKnowledge;
-    });
+    );
 
     transitionTo("drafting");
-    currentOutput = await runStep("draft_generation", async () =>
-      generationOutputSchema.parse(
-        await dependencies.generator.draft({
+    currentOutput = await runStep(
+      "draft_generation",
+      async () =>
+        dependencies.generator.draft({
           requirementMemo,
           plan: plan!,
           knowledge: knowledge!
-        })
-      )
+        }),
+      (value) => generationOutputSchema.parse(value)
     );
     initialDraft = currentOutput;
 
     while (reviewCount < maxReviewCount) {
       transitionTo("reviewing");
       reviewCount += 1;
-      const review = await runStep("review", async () =>
-        agentReviewSchema.parse(
-          await dependencies.reviewer.review({
+      const review = await runStep(
+        "review",
+        async () =>
+          dependencies.reviewer.review({
             requirementMemo,
             plan: plan!,
             knowledge: knowledge!,
             output: currentOutput!
-          })
-        )
+          }),
+        (value) => agentReviewSchema.parse(value)
       );
       reviews.push(review);
 
@@ -337,16 +426,17 @@ export async function runAgentWorkflow({
 
       transitionTo("revising");
       revisionCount += 1;
-      currentOutput = await runStep("revision", async () =>
-        generationOutputSchema.parse(
-          await dependencies.generator.revise({
+      currentOutput = await runStep(
+        "revision",
+        async () =>
+          dependencies.generator.revise({
             requirementMemo,
             plan: plan!,
             knowledge: knowledge!,
             currentOutput: currentOutput!,
             findings: getRevisionRequiredFindings(review)
-          })
-        )
+          }),
+        (value) => generationOutputSchema.parse(value)
       );
     }
 

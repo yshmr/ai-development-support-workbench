@@ -234,7 +234,7 @@ Definitions:
 | `revisionLimitReachedRate` | completed_with_findings due to revision_limit_reached / Agent ON runs |
 | `majorBlockerFindingResolutionRate` | first-review blocker/major findings no longer present after revision / first-review blocker/major findings |
 | `invalidTransitionCount` | rejected invalid transitions |
-| `averageLlmStepCount` | average count of planning, draft, review, revision, second review LLM steps |
+| `averageLlmStepCount` | average count of actual provider-backed LLM executions; stub steps, retrieval tool invocations, and embedding calls are excluded |
 | `knowledgeToolInvocationCount` | count of `knowledge.retrieve` invocations |
 | `traceCompletenessRate` | runs with required step traces / all Agent ON runs |
 

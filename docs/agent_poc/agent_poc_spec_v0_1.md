@@ -650,6 +650,8 @@ type AgentLlmUsageAggregate = {
 };
 ```
 
+`llmStepCount` counts actual provider-backed LLM executions. It does not count a logical role merely because the step name is `planning`, `review`, or `revision`. Stub Reviewer steps and Knowledge Retrieval Tool invocations are excluded. Provider-backed steps still count when token usage is unavailable.
+
 Provider token usage must use provider-reported usage only. Do not estimate unavailable token usage. Retrieval embedding usage is separate from generation LLM usage.
 
 ## 21. Step Trace

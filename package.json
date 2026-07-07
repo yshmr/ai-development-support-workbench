@@ -18,7 +18,8 @@
     "rag:ingest:heading": "tsx scripts/rag-ingest.ts heading-aware-v1",
     "rag:evaluate": "tsx scripts/rag-evaluate.ts",
     "rag:evaluate:fixed": "tsx scripts/rag-evaluate.ts fixed-size-v1",
-    "rag:evaluate:heading": "tsx scripts/rag-evaluate.ts heading-aware-v1"
+    "rag:evaluate:heading": "tsx scripts/rag-evaluate.ts heading-aware-v1",
+    "agent:smoke": "tsx scripts/agent-smoke.ts"
   },
   "dependencies": {
     "@next/env": "^15.5.20",

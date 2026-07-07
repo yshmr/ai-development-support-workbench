@@ -92,6 +92,8 @@ export const agentStepTraceSchema = z.object({
   provider: z.string().min(1).optional(),
   modelName: z.string().min(1).optional(),
   promptVersion: z.string().min(1).optional(),
+  providerBacked: z.boolean().optional(),
+  providerLatencyMs: optionalNonNegativeNumberSchema,
   inputTokens: optionalNonNegativeNumberSchema,
   outputTokens: optionalNonNegativeNumberSchema,
   totalTokens: optionalNonNegativeNumberSchema,
@@ -145,6 +147,7 @@ export type AgentRunResult = {
   output?: GenerationOutput;
   initialDraft?: GenerationOutput;
   plan?: AgentPlan;
+  knowledge?: KnowledgeRetrievalToolResult;
   reviews: AgentReview[];
   metadata: AgentRunMetadata;
   error?: SanitizedAgentError;
@@ -152,3 +155,66 @@ export type AgentRunResult = {
 
 export { generationOutputSchema };
 export type { GenerationOutput };
+
+export const agentPlanJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "normalizedGoal",
+    "explicitRequirements",
+    "constraints",
+    "ambiguities",
+    "knowledgeNeeds"
+  ],
+  properties: {
+    normalizedGoal: { type: "string" },
+    explicitRequirements: {
+      type: "array",
+      items: { type: "string" }
+    },
+    constraints: {
+      type: "array",
+      items: { type: "string" }
+    },
+    ambiguities: {
+      type: "array",
+      items: { type: "string" }
+    },
+    knowledgeNeeds: {
+      type: "array",
+      items: { type: "string" }
+    }
+  }
+} as const;
+
+export const geminiAgentPlanSchema = {
+  type: "object",
+  required: [
+    "normalizedGoal",
+    "explicitRequirements",
+    "constraints",
+    "ambiguities",
+    "knowledgeNeeds"
+  ],
+  properties: {
+    normalizedGoal: { type: "string" },
+    explicitRequirements: {
+      type: "array",
+      items: { type: "string" }
+    },
+    constraints: {
+      type: "array",
+      items: { type: "string" }
+    },
+    ambiguities: {
+      type: "array",
+      items: { type: "string" }
+    },
+    knowledgeNeeds: {
+      type: "array",
+      items: { type: "string" }
+    }
+  }
+} as const;
+
+export const anthropicAgentPlanSchema = agentPlanJsonSchema;

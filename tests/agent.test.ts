@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { decideRevision } from "@/lib/agent/decision";
+import { createPassThroughStubReviewer } from "@/lib/agent/executors";
+import { createRagKnowledgeRetrievalTool } from "@/lib/agent/knowledge";
 import {
   createSequenceReviewer,
   createStaticGenerator,
@@ -9,6 +11,12 @@ import {
   runAgentWorkflow,
   type AgentWorkflowDependencies
 } from "@/lib/agent/orchestrator";
+import {
+  agentDraftPromptVersion,
+  agentPlannerPromptVersion,
+  generateAgentDraft,
+  generateAgentPlan
+} from "@/lib/agent/provider";
 import {
   canTransitionAgentState,
   isTerminalAgentState,
@@ -21,6 +29,13 @@ import type {
   GenerationOutput,
   KnowledgeRetrievalToolResult
 } from "@/lib/agent/schema";
+import type { RetrievedChunk } from "@/lib/rag/schema";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 const requirementMemo = `ユーザーがプロフィール画像を変更できるようにしたい。
 画像は5MBまで、jpg/png対応。
@@ -450,7 +465,7 @@ describe("Agent workflow orchestrator", () => {
       true
     );
     expect(result.metadata.steps[3].reviewDecision).toBe("pass");
-    expect(result.metadata.llmStepCount).toBe(3);
+    expect(result.metadata.llmStepCount).toBe(0);
   });
 
   it("records revision path step trace in order and does not retrieve twice", async () => {
@@ -474,8 +489,544 @@ describe("Agent workflow orchestrator", () => {
     ]);
     expect(result.metadata.steps[3].reviewDecision).toBe("revise");
     expect(result.metadata.steps[5].reviewDecision).toBe("pass");
-    expect(result.metadata.llmStepCount).toBe(5);
+    expect(result.metadata.llmStepCount).toBe(0);
     expect(result.metadata.toolInvocationCount).toBe(1);
     expect(knowledgeTool.invoke).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Agent Phase 1-C real integration adapters", () => {
+  function openAiResponse(data: unknown, usage = {
+    input_tokens: 11,
+    output_tokens: 22,
+    total_tokens: 33
+  }) {
+    return new Response(
+      JSON.stringify({
+        output_text: JSON.stringify(data),
+        usage
+      }),
+      { status: 200 }
+    );
+  }
+
+  function retrievedChunk(overrides: Partial<RetrievedChunk> = {}): RetrievedChunk {
+    return {
+      rank: 1,
+      score: 0.91,
+      chunkId: "profile-image-spec:heading-aware-v1:0001",
+      documentId: "profile-image-spec",
+      sourcePath: "data/rag/knowledge/profile-image-spec.md",
+      documentTitle: "プロフィール画像仕様",
+      headingPath: ["プロフィール画像仕様", "受け入れ条件"],
+      content: "5MB以下のJPGまたはPNGをアップロードできる。",
+      ...overrides
+    };
+  }
+
+  function setupOpenAiEnv() {
+    vi.stubEnv("LLM_PROVIDER", "openai");
+    vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
+    vi.stubEnv("OPENAI_MODEL", "gpt-5.4-mini");
+  }
+
+  it("validates real Planner structured output without retrievalQuery or reasoning fields", async () => {
+    setupOpenAiEnv();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        openAiResponse({
+          ...samplePlan,
+          retrievalQuery: "do not keep",
+          reasoning: "do not keep"
+        })
+      )
+    );
+
+    const result = await generateAgentPlan(requirementMemo);
+
+    expect(result.data).toEqual(samplePlan);
+    expect(result.data).not.toHaveProperty("retrievalQuery");
+    expect(result.data).not.toHaveProperty("reasoning");
+    expect(result.metadata).toMatchObject({
+      provider: "openai",
+      modelName: "gpt-5.4-mini",
+      promptVersion: agentPlannerPromptVersion,
+      inputTokens: 11,
+      outputTokens: 22,
+      totalTokens: 33
+    });
+  });
+
+  it("fails closed when Planner returns invalid structured output", async () => {
+    setupOpenAiEnv();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        openAiResponse({
+          normalizedGoal: "missing required arrays"
+        })
+      )
+    );
+    const knowledgeTool = createStaticKnowledgeRetrievalTool(sampleKnowledge);
+    const generator = createStaticGenerator({ draft: sampleOutput() });
+    const knowledgeSpy = vi.spyOn(knowledgeTool, "invoke");
+    const draftSpy = vi.spyOn(generator, "draft");
+
+    const result = await runAgentWorkflow({
+      requirementMemo,
+      dependencies: {
+        planner: {
+          plan: async ({ requirementMemo: input }) => {
+            const plan = await generateAgentPlan(input);
+            return {
+              __agentExecutorResult: true,
+              data: plan.data,
+              metadata: plan.metadata
+            };
+          }
+        },
+        knowledgeTool,
+        generator,
+        reviewer: createPassThroughStubReviewer()
+      }
+    });
+
+    expect(result.metadata.status).toBe("failed");
+    expect(result.metadata.finalState).toBe("failed");
+    expect(result.error?.stepName).toBe("planning");
+    expect(knowledgeSpy).not.toHaveBeenCalled();
+    expect(draftSpy).not.toHaveBeenCalled();
+  });
+
+  it("uses the original requirement memo as the Knowledge Retrieval Tool query", async () => {
+    setupOpenAiEnv();
+    vi.stubGlobal("fetch", vi.fn(async () => openAiResponse(samplePlan)));
+    const knowledgeTool = createStaticKnowledgeRetrievalTool(sampleKnowledge);
+    const knowledgeSpy = vi.spyOn(knowledgeTool, "invoke");
+
+    await runAgentWorkflow({
+      requirementMemo,
+      dependencies: {
+        planner: {
+          plan: async ({ requirementMemo: input }) => {
+            const plan = await generateAgentPlan(input);
+            return {
+              __agentExecutorResult: true,
+              data: plan.data,
+              metadata: plan.metadata
+            };
+          }
+        },
+        knowledgeTool,
+        generator: createStaticGenerator({ draft: sampleOutput() }),
+        reviewer: createPassThroughStubReviewer()
+      }
+    });
+
+    expect(knowledgeSpy).toHaveBeenCalledWith({ query: requirementMemo });
+    expect(knowledgeSpy).not.toHaveBeenCalledWith({
+      query: samplePlan.normalizedGoal
+    });
+    expect(knowledgeSpy).not.toHaveBeenCalledWith({
+      query: samplePlan.knowledgeNeeds.join("\n")
+    });
+  });
+
+  it("uses existing RAG retrieval with heading-aware and document-diversity configuration", async () => {
+    const retrieveSpy = vi.fn(async () => ({
+      query: requirementMemo,
+      strategy: "heading-aware-v1" as const,
+      topK: 10,
+      embeddingModel: "text-embedding-3-small",
+      embeddingUsage: {
+        promptTokens: 7,
+        totalTokens: 7
+      },
+      results: [
+        retrievedChunk({ rank: 1, documentId: "profile-image-spec" }),
+        retrievedChunk({
+          rank: 4,
+          chunkId: "error-message-guideline:heading-aware-v1:0001",
+          documentId: "error-message-guideline",
+          documentTitle: "エラーメッセージガイドライン",
+          content: "5MBを超える場合は画像サイズエラーを表示する。"
+        }),
+        retrievedChunk({
+          rank: 8,
+          chunkId: "frontend-cache-guideline:heading-aware-v1:0001",
+          documentId: "frontend-cache-guideline",
+          documentTitle: "フロントエンドキャッシュガイドライン",
+          content: "latest image URLをユーザー状態へ反映する。"
+        })
+      ]
+    }));
+    const tool = createRagKnowledgeRetrievalTool({
+      retrieveRagChunks: retrieveSpy
+    });
+
+    const result = await tool.invoke({ query: requirementMemo });
+    const knowledgeResult = result.data as KnowledgeRetrievalToolResult & {
+      sources: Array<{
+        retrievalRank?: number;
+        contextRank?: number;
+      }>;
+    };
+
+    expect(retrieveSpy).toHaveBeenCalledWith({
+      query: requirementMemo,
+      strategy: "heading-aware-v1",
+      topK: 10
+    });
+    expect(knowledgeResult.retrievalMetadata).toMatchObject({
+      mode: "on",
+      strategy: "heading-aware-v1",
+      contextPolicy: "document-diversity-v1",
+      candidateTopK: 10,
+      requestedFinalTopK: 5,
+      maxChunksPerDocument: 2,
+      selectedChunkCount: 3,
+      uniqueDocumentCount: 3,
+      maximumChunksFromSameDocument: 1
+    });
+    expect(knowledgeResult.sources.map((source) => source.retrievalRank)).toEqual([
+      1, 4, 8
+    ]);
+    expect(knowledgeResult.sources.map((source) => source.contextRank)).toEqual([
+      1, 2, 3
+    ]);
+    expect(knowledgeResult.embeddingUsage).toEqual({
+      promptTokens: 7,
+      totalTokens: 7
+    });
+  });
+
+  it("fails closed on retrieval failure and zero selected context before draft generation", async () => {
+    const failingTool = createRagKnowledgeRetrievalTool({
+      retrieveRagChunks: vi.fn(async () => {
+        throw new Error("Qdrant unavailable");
+      })
+    });
+    const generator = createStaticGenerator({ draft: sampleOutput() });
+    const draftSpy = vi.spyOn(generator, "draft");
+
+    const failureResult = await runAgentWorkflow({
+      requirementMemo,
+      dependencies: {
+        planner: createStaticPlanner(samplePlan),
+        knowledgeTool: failingTool,
+        generator,
+        reviewer: createPassThroughStubReviewer()
+      }
+    });
+
+    expect(failureResult.metadata.status).toBe("failed");
+    expect(failureResult.error?.stepName).toBe("knowledge_retrieval");
+    expect(draftSpy).not.toHaveBeenCalled();
+
+    const emptyTool = createRagKnowledgeRetrievalTool({
+      retrieveRagChunks: vi.fn(async () => ({
+        query: requirementMemo,
+        strategy: "heading-aware-v1" as const,
+        topK: 10,
+        embeddingModel: "text-embedding-3-small",
+        results: []
+      }))
+    });
+
+    const emptyResult = await runAgentWorkflow({
+      requirementMemo,
+      dependencies: {
+        planner: createStaticPlanner(samplePlan),
+        knowledgeTool: emptyTool,
+        generator,
+        reviewer: createPassThroughStubReviewer()
+      }
+    });
+
+    expect(emptyResult.metadata.status).toBe("failed");
+    expect(emptyResult.error?.stepName).toBe("knowledge_retrieval");
+    expect(draftSpy).not.toHaveBeenCalled();
+  });
+
+  it("passes AgentPlan and grounded knowledge to the Draft Generator provider request", async () => {
+    setupOpenAiEnv();
+    const fetchMock = vi.fn(async () => openAiResponse(sampleOutput()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await generateAgentDraft({
+      requirementMemo,
+      plan: samplePlan,
+      groundedContext: sampleKnowledge.groundedContext
+    });
+
+    const requestBody = JSON.parse(
+      String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)
+    );
+    const userContent = requestBody.input[1].content as string;
+    const systemContent = requestBody.input[0].content as string;
+
+    expect(result.data).toEqual(sampleOutput());
+    expect(systemContent).toContain(
+      "AgentPlanはworkflow planning artifact"
+    );
+    expect(systemContent).toContain(
+      "未解決のambiguityはspecやacceptanceCriteriaのmandatory ruleとして断定せず"
+    );
+    expect(systemContent).toContain(
+      "knowledgeNeedsをmandatory product ruleへ昇格させないでください"
+    );
+    expect(userContent).toContain("Original requirement memo");
+    expect(userContent).toContain(requirementMemo);
+    expect(userContent).toContain("AgentPlan JSON");
+    expect(userContent).toContain(samplePlan.normalizedGoal);
+    expect(userContent).toContain(sampleKnowledge.groundedContext);
+    expect(userContent).not.toContain("test-openai-key");
+    expect(result.metadata.promptVersion).toBe(agentDraftPromptVersion);
+  });
+
+  it("fails closed when Draft Generator output is invalid", async () => {
+    setupOpenAiEnv();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        openAiResponse({
+          summary: "missing required GenerationOutput fields"
+        })
+      )
+    );
+
+    const result = await runAgentWorkflow({
+      requirementMemo,
+      dependencies: {
+        planner: createStaticPlanner(samplePlan),
+        knowledgeTool: createStaticKnowledgeRetrievalTool(sampleKnowledge),
+        generator: {
+          draft: async ({ requirementMemo: input, plan, knowledge }) => {
+            const draft = await generateAgentDraft({
+              requirementMemo: input,
+              plan,
+              groundedContext: knowledge.groundedContext
+            });
+            return {
+              __agentExecutorResult: true,
+              data: draft.data,
+              metadata: draft.metadata
+            };
+          },
+          revise: ({ currentOutput }) => currentOutput
+        },
+        reviewer: createPassThroughStubReviewer()
+      }
+    });
+
+    expect(result.metadata.status).toBe("failed");
+    expect(result.error?.stepName).toBe("draft_generation");
+  });
+
+  it("uses the same provider and model for Planner and Draft while separating prompt versions", async () => {
+    setupOpenAiEnv();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(openAiResponse(samplePlan, {
+        input_tokens: 101,
+        output_tokens: 51,
+        total_tokens: 152
+      }))
+      .mockResolvedValueOnce(openAiResponse(sampleOutput(), {
+        input_tokens: 202,
+        output_tokens: 102,
+        total_tokens: 304
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await runAgentWorkflow({
+      requirementMemo,
+      dependencies: {
+        planner: {
+          plan: async ({ requirementMemo: input }) => {
+            const plan = await generateAgentPlan(input);
+            return {
+              __agentExecutorResult: true,
+              data: plan.data,
+              metadata: plan.metadata
+            };
+          }
+        },
+        knowledgeTool: createStaticKnowledgeRetrievalTool(sampleKnowledge),
+        generator: {
+          draft: async ({ requirementMemo: input, plan, knowledge }) => {
+            const draft = await generateAgentDraft({
+              requirementMemo: input,
+              plan,
+              groundedContext: knowledge.groundedContext
+            });
+            return {
+              __agentExecutorResult: true,
+              data: draft.data,
+              metadata: draft.metadata
+            };
+          },
+          revise: ({ currentOutput }) => currentOutput
+        },
+        reviewer: createPassThroughStubReviewer()
+      }
+    });
+
+    const plannerStep = result.metadata.steps.find(
+      (step) => step.stepName === "planning"
+    );
+    const draftStep = result.metadata.steps.find(
+      (step) => step.stepName === "draft_generation"
+    );
+
+    expect(plannerStep).toMatchObject({
+      provider: "openai",
+      modelName: "gpt-5.4-mini",
+      promptVersion: agentPlannerPromptVersion,
+      providerBacked: true,
+      inputTokens: 101,
+      outputTokens: 51,
+      totalTokens: 152
+    });
+    expect(draftStep).toMatchObject({
+      provider: "openai",
+      modelName: "gpt-5.4-mini",
+      promptVersion: agentDraftPromptVersion,
+      providerBacked: true,
+      inputTokens: 202,
+      outputTokens: 102,
+      totalTokens: 304
+    });
+    expect(plannerStep?.promptVersion).not.toBe("llm-app-poc-rag-v1");
+    expect(draftStep?.promptVersion).not.toBe("llm-app-poc-rag-v1");
+    expect(result.metadata.llmStepCount).toBe(2);
+  });
+
+  it("counts provider-backed steps even when token usage is unavailable", async () => {
+    setupOpenAiEnv();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            output_text: JSON.stringify(samplePlan)
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            output_text: JSON.stringify(sampleOutput())
+          }),
+          { status: 200 }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await runAgentWorkflow({
+      requirementMemo,
+      dependencies: {
+        planner: {
+          plan: async ({ requirementMemo: input }) => {
+            const plan = await generateAgentPlan(input);
+            return {
+              __agentExecutorResult: true,
+              data: plan.data,
+              metadata: plan.metadata
+            };
+          }
+        },
+        knowledgeTool: createStaticKnowledgeRetrievalTool(sampleKnowledge),
+        generator: {
+          draft: async ({ requirementMemo: input, plan, knowledge }) => {
+            const draft = await generateAgentDraft({
+              requirementMemo: input,
+              plan,
+              groundedContext: knowledge.groundedContext
+            });
+            return {
+              __agentExecutorResult: true,
+              data: draft.data,
+              metadata: draft.metadata
+            };
+          },
+          revise: ({ currentOutput }) => currentOutput
+        },
+        reviewer: createPassThroughStubReviewer()
+      }
+    });
+    const plannerStep = result.metadata.steps.find(
+      (step) => step.stepName === "planning"
+    );
+    const draftStep = result.metadata.steps.find(
+      (step) => step.stepName === "draft_generation"
+    );
+
+    expect(result.metadata.llmStepCount).toBe(2);
+    expect(plannerStep?.providerBacked).toBe(true);
+    expect(draftStep?.providerBacked).toBe(true);
+    expect(plannerStep?.inputTokens).toBeUndefined();
+    expect(draftStep?.inputTokens).toBeUndefined();
+  });
+
+  it("normal Phase 1-C workflow uses stub Reviewer and completes without revision", async () => {
+    setupOpenAiEnv();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(openAiResponse(samplePlan))
+      .mockResolvedValueOnce(openAiResponse(sampleOutput()));
+    vi.stubGlobal("fetch", fetchMock);
+    const reviewer = createPassThroughStubReviewer();
+    const reviewSpy = vi.spyOn(reviewer, "review");
+
+    const result = await runAgentWorkflow({
+      requirementMemo,
+      dependencies: {
+        planner: {
+          plan: async ({ requirementMemo: input }) => {
+            const plan = await generateAgentPlan(input);
+            return {
+              __agentExecutorResult: true,
+              data: plan.data,
+              metadata: plan.metadata
+            };
+          }
+        },
+        knowledgeTool: createStaticKnowledgeRetrievalTool(sampleKnowledge),
+        generator: {
+          draft: async ({ requirementMemo: input, plan, knowledge }) => {
+            const draft = await generateAgentDraft({
+              requirementMemo: input,
+              plan,
+              groundedContext: knowledge.groundedContext
+            });
+            return {
+              __agentExecutorResult: true,
+              data: draft.data,
+              metadata: draft.metadata
+            };
+          },
+          revise: ({ currentOutput }) => currentOutput
+        },
+        reviewer
+      }
+    });
+
+    expect(result.metadata.steps.map((step) => step.stepName)).toEqual([
+      "planning",
+      "knowledge_retrieval",
+      "draft_generation",
+      "review",
+      "finalization"
+    ]);
+    expect(result.metadata.status).toBe("completed");
+    expect(result.metadata.terminationReason).toBe("review_passed");
+    expect(result.metadata.revisionCount).toBe(0);
+    expect(result.metadata.reviewCount).toBe(1);
+    expect(result.metadata.llmStepCount).toBe(2);
+    expect(reviewSpy).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
