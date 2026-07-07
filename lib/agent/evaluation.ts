@@ -701,6 +701,15 @@ export async function executeAgentRoutingEvaluationRunPlan(input: {
   executeOn?: ExecuteRoutingEvaluationRun;
   executeRouted?: ExecuteRoutingEvaluationRun;
   createdAt?: string;
+  onRunStart?: (input: {
+    plannedRun: PlannedRoutingEvaluationRun;
+    totalRuns: number;
+  }) => void;
+  onRunComplete?: (input: {
+    plannedRun: PlannedRoutingEvaluationRun;
+    totalRuns: number;
+    rawRun: RawRoutingEvaluationRun;
+  }) => void;
 }): Promise<RawRoutingEvaluationBundle> {
   const cases = validateAgentEvaluationCases(input.cases);
   const caseById = new Map(cases.map((testCase) => [testCase.caseId, testCase]));
@@ -717,13 +726,21 @@ export async function executeAgentRoutingEvaluationRunPlan(input: {
       throw new Error(`Unknown planned caseId: ${plannedRun.caseId}`);
     }
 
+    input.onRunStart?.({ plannedRun, totalRuns: plannedRuns.length });
+
     const result =
       plannedRun.mode === "off"
         ? await executeOff(testCase, plannedRun)
         : plannedRun.mode === "on"
           ? await executeOn(testCase, plannedRun)
           : await executeRouted(testCase, plannedRun);
-    runs.push(buildRoutingRawRun({ plannedRun, testCase, result }));
+    const rawRun = buildRoutingRawRun({ plannedRun, testCase, result });
+    runs.push(rawRun);
+    input.onRunComplete?.({
+      plannedRun,
+      totalRuns: plannedRuns.length,
+      rawRun
+    });
   }
 
   return rawRoutingEvaluationBundleSchema.parse({

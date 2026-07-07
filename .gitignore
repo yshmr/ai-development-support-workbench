@@ -14,5 +14,7 @@ data/agent/evaluation/phase_1_e_revision_pairs.json
 data/agent/evaluation/phase_1_e_summary.json
 data/agent/evaluation/phase_1_e_report.md
 data/agent/evaluation/phase_1_e_manual_score_template.md
+data/agent/evaluation/phase_2_a_*.json
+data/agent/evaluation/phase_2_a_*.md
 .env*.local
 qdrant_storage/

@@ -17,7 +17,24 @@ async function main() {
   loadRagCliEnv();
 
   const cases = await loadAgentEvaluationCases();
-  const rawBundle = await executeAgentRoutingEvaluationRunPlan({ cases });
+  const startedAtMs = Date.now();
+  console.info("Agent Phase 2-A routing evaluation started.");
+  console.info("This executes 24 real evaluation runs and can take several minutes.");
+
+  const rawBundle = await executeAgentRoutingEvaluationRunPlan({
+    cases,
+    onRunStart: ({ plannedRun, totalRuns }) => {
+      console.info(
+        `[${plannedRun.executionOrder}/${totalRuns}] start mode=${plannedRun.mode} case=${plannedRun.caseId} runIndex=${plannedRun.runIndex}`
+      );
+    },
+    onRunComplete: ({ plannedRun, totalRuns, rawRun }) => {
+      const routedExecutionMode = rawRun.routedExecutionMode ?? "N/A";
+      console.info(
+        `[${plannedRun.executionOrder}/${totalRuns}] done mode=${plannedRun.mode} case=${plannedRun.caseId} status=${rawRun.status} routedExecutionMode=${routedExecutionMode} elapsedMs=${rawRun.evaluationElapsedMs}`
+      );
+    }
+  });
   const { blindBundle, mappingFile } =
     createBlindRoutingBundleAndMapping(rawBundle);
   assertBlindBundleHasNoModeLeak(blindBundle);
@@ -36,6 +53,7 @@ async function main() {
   const failedRuns = rawBundle.runs.filter((run) => run.status === "failed").length;
 
   console.info("Agent Phase 2-A routing evaluation run bundle created.");
+  console.info(`totalElapsedMs=${Date.now() - startedAtMs}`);
   console.info(
     `totalRuns=${rawBundle.runs.length} offRuns=${offRuns} onRuns=${onRuns} routedRuns=${routedRuns}`
   );

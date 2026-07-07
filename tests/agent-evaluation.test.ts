@@ -359,11 +359,20 @@ describe("Agent Phase 1-E evaluation dataset and matrix", () => {
 });
 
 describe("Agent Phase 2-A routing evaluation behavior", () => {
-  async function createRoutingStubBundle() {
+  async function createRoutingStubBundle(input?: {
+    onRunStart?: Parameters<
+      typeof executeAgentRoutingEvaluationRunPlan
+    >[0]["onRunStart"];
+    onRunComplete?: Parameters<
+      typeof executeAgentRoutingEvaluationRunPlan
+    >[0]["onRunComplete"];
+  }) {
     const cases = await loadAgentEvaluationCases();
     return executeAgentRoutingEvaluationRunPlan({
       cases,
       createdAt: fixedCreatedAt,
+      onRunStart: input?.onRunStart,
+      onRunComplete: input?.onRunComplete,
       executeOff: async (testCase, plannedRun) => ({
         request: buildAgentOffRequest(testCase),
         status: "completed",
@@ -442,7 +451,16 @@ describe("Agent Phase 2-A routing evaluation behavior", () => {
   }
 
   it("creates Phase 2-A raw, blind, mapping, and routing metrics without mode leaks", async () => {
-    const rawBundle = await createRoutingStubBundle();
+    const startedRunIds: string[] = [];
+    const completedRunIds: string[] = [];
+    const rawBundle = await createRoutingStubBundle({
+      onRunStart: ({ plannedRun }) => {
+        startedRunIds.push(plannedRun.rawRunId);
+      },
+      onRunComplete: ({ rawRun }) => {
+        completedRunIds.push(rawRun.rawRunId);
+      }
+    });
     const { blindBundle, mappingFile } = createBlindRoutingBundleAndMapping(rawBundle);
     const manualScores = completeRoutingManualScores(
       blindBundle.samples.map((sample) => sample.sampleId)
@@ -462,6 +480,10 @@ describe("Agent Phase 2-A routing evaluation behavior", () => {
     });
 
     expect(rawBundle.runs).toHaveLength(24);
+    expect(startedRunIds).toHaveLength(24);
+    expect(completedRunIds).toHaveLength(24);
+    expect(startedRunIds[0]).toBe("ROUTE-RUN-001");
+    expect(completedRunIds[23]).toBe("ROUTE-RUN-024");
     expect(rawBundle.runs.filter((run) => run.mode === "routed")).toHaveLength(8);
     expect(blindBundle.samples).toHaveLength(24);
     expect(mappingFile.mappings).toHaveLength(24);
