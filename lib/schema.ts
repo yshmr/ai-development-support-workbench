@@ -15,7 +15,7 @@ export const jiraTaskSchema = z.object({
 
 export const llmProviderSchema = z.enum(["mock", "openai", "gemini", "anthropic"]);
 export const ragModeSchema = z.enum(["off", "on"]);
-export const agentModeSchema = z.enum(["off", "on"]);
+export const agentModeSchema = z.enum(["off", "on", "auto"]);
 export const ragContextPolicySchema = z.enum([
   "raw-top-k-v1",
   "document-cap-v1",

@@ -159,6 +159,10 @@ describe("generation schema", () => {
       generateRequestSchema.parse({ inputText: sampleInput }).agentMode
     ).toBe("off");
     expect(
+      generateRequestSchema.parse({ inputText: sampleInput, agentMode: "auto" })
+        .agentMode
+    ).toBe("auto");
+    expect(
       generateRequestSchema.parse({ inputText: sampleInput }).ragContextPolicy
     ).toBe("raw-top-k-v1");
     expect(ragContextPolicySchema.parse("document-cap-v1")).toBe(
@@ -921,7 +925,98 @@ describe("POST /api/generate", () => {
     });
   });
 
-  it("rejects explicit RAG controls when agentMode is on", async () => {
+  it("routes agentMode auto to single-pass RAG for low-risk requirements", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mock");
+    const lowRiskInput = "検索結果をステータスで絞り込めるようにしたい。";
+    const retrieveSpy = vi
+      .spyOn(ragRetriever, "retrieveRagChunks")
+      .mockResolvedValueOnce({
+        query: lowRiskInput,
+        strategy: "heading-aware-v1",
+        topK: 10,
+        embeddingModel: "text-embedding-3-small",
+        results: [sampleRetrievedChunk()]
+      });
+
+    await withPreservedGenerationData(async () => {
+      const response = await POST(
+        new Request("http://localhost/api/generate", {
+          method: "POST",
+          body: JSON.stringify({ inputText: lowRiskInput, agentMode: "auto" })
+        })
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.agent).toBeUndefined();
+      expect(body.agentRouting).toMatchObject({
+        mode: "single_pass",
+        policyVersion: "agent-routing-v1"
+      });
+      expect(body.rag).toMatchObject({
+        mode: "on",
+        contextPolicy: "document-diversity-v1",
+        candidateTopK: 10
+      });
+      expect(retrieveSpy).toHaveBeenCalledWith({
+        query: lowRiskInput,
+        strategy: "heading-aware-v1",
+        topK: 10
+      });
+    });
+  });
+
+  it("routes agentMode auto to Agent workflow for ambiguous safety requirements", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mock");
+    const ambiguousInput =
+      "プロフィール周りの画像更新をもっと安全で使いやすくしたい。どこまで対応するべきか整理したい。";
+    const retrieveSpy = vi
+      .spyOn(ragRetriever, "retrieveRagChunks")
+      .mockResolvedValueOnce({
+        query: ambiguousInput,
+        strategy: "heading-aware-v1",
+        topK: 10,
+        embeddingModel: "text-embedding-3-small",
+        results: [sampleRetrievedChunk()]
+      });
+
+    await withPreservedGenerationData(async () => {
+      await withPreservedAgentRunData(async () => {
+        const beforeGenerationData = existsSync(getDataPath())
+          ? readFileSync(getDataPath(), "utf8")
+          : "[]\n";
+        const response = await POST(
+          new Request("http://localhost/api/generate", {
+            method: "POST",
+            body: JSON.stringify({ inputText: ambiguousInput, agentMode: "auto" })
+          })
+        );
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.agentRouting).toMatchObject({
+          mode: "agent_workflow",
+          policyVersion: "agent-routing-v1"
+        });
+        expect(body.agent).toMatchObject({
+          status: "completed",
+          routing: expect.objectContaining({
+            mode: "agent_workflow"
+          })
+        });
+        expect(retrieveSpy).toHaveBeenCalledWith({
+          query: ambiguousInput,
+          strategy: "heading-aware-v1",
+          topK: 10
+        });
+        expect(
+          existsSync(getDataPath()) ? readFileSync(getDataPath(), "utf8") : "[]\n"
+        ).toBe(beforeGenerationData);
+      });
+    });
+  });
+
+  it("rejects explicit RAG controls when agentMode is on or auto", async () => {
     const retrieveSpy = vi.spyOn(ragRetriever, "retrieveRagChunks");
 
     const response = await POST(
@@ -934,10 +1029,23 @@ describe("POST /api/generate", () => {
         })
       })
     );
+    const autoResponse = await POST(
+      new Request("http://localhost/api/generate", {
+        method: "POST",
+        body: JSON.stringify({
+          inputText: sampleInput,
+          agentMode: "auto",
+          ragMode: "on"
+        })
+      })
+    );
     const body = await response.json();
+    const autoBody = await autoResponse.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toContain("agentMode=on");
+    expect(autoResponse.status).toBe(400);
+    expect(body.error).toContain("agentMode=on/auto");
+    expect(autoBody.error).toContain("agentMode=on/auto");
     expect(retrieveSpy).not.toHaveBeenCalled();
   });
 

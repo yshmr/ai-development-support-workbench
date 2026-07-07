@@ -25,6 +25,7 @@ import {
   runAgentWorkflow,
   type AgentWorkflowDependencies
 } from "./orchestrator";
+import { createAgentRoutingDecision } from "./routing";
 import {
   agentPlanSchema,
   agentReviewHistoryEntrySchema,
@@ -431,6 +432,21 @@ export function buildAgentOnRequest(testCase: AgentEvaluationCase) {
     inputText: testCase.requirementMemo,
     agentMode: "on" as const
   };
+}
+
+export function buildAgentRoutedRequest(testCase: AgentEvaluationCase) {
+  return {
+    inputText: testCase.requirementMemo,
+    agentMode: "auto" as const
+  };
+}
+
+export function buildAgentRoutingDecisionForEvaluation(
+  testCase: AgentEvaluationCase
+) {
+  return createAgentRoutingDecision({
+    requirementMemo: testCase.requirementMemo
+  });
 }
 
 export function assertNoEvaluationRubricLeak(request: unknown) {

@@ -6,6 +6,7 @@ import { generateRequestSchema, type RagMetadata } from "@/lib/schema";
 import { runAgentWorkflow } from "@/lib/agent/orchestrator";
 import { createRealAgentWorkflowDependencies } from "@/lib/agent/runtime";
 import { createFileAgentRunStore } from "@/lib/agent/storage";
+import { createAgentRoutingDecision } from "@/lib/agent/routing";
 import { getGroundedGenerationRagConfig } from "@/lib/rag/config";
 import { buildGroundedContext } from "@/lib/rag/context";
 import {
@@ -80,20 +81,32 @@ export async function POST(request: Request) {
   }
 
   try {
+    const agentRouting =
+      parsedRequest.data.agentMode === "auto"
+        ? createAgentRoutingDecision({
+            requirementMemo: parsedRequest.data.inputText
+          })
+        : undefined;
+    const effectiveAgentMode =
+      parsedRequest.data.agentMode === "on" ||
+      agentRouting?.mode === "agent_workflow"
+        ? "on"
+        : "off";
+
     if (
-      parsedRequest.data.agentMode === "on" &&
+      parsedRequest.data.agentMode !== "off" &&
       (hasOwnField(body, "ragMode") || hasOwnField(body, "ragContextPolicy"))
     ) {
       return NextResponse.json(
         {
           error:
-            "agentMode=on の場合は ragMode / ragContextPolicy を指定しないでください。Agent workflowは内部RAG policyを使用します。"
+            "agentMode=on/auto の場合は ragMode / ragContextPolicy を指定しないでください。Agent workflowまたはrouterは内部RAG policyを使用します。"
         },
         { status: 400 }
       );
     }
 
-    if (parsedRequest.data.agentMode === "on") {
+    if (effectiveAgentMode === "on") {
       const agentResult = await runAgentWorkflow({
         requirementMemo: parsedRequest.data.inputText,
         dependencies: createRealAgentWorkflowDependencies(),
@@ -113,6 +126,7 @@ export async function POST(request: Request) {
         outputTokens: undefined,
         totalTokens: undefined,
         rag: { mode: "off" },
+        agentRouting,
         createdAt: agentResult.createdAt,
         agent: {
           runId: agentResult.runId,
@@ -124,6 +138,7 @@ export async function POST(request: Request) {
           totalAgentLatencyMs: agentResult.metadata.totalAgentLatencyMs,
           llmStepCount: agentResult.metadata.llmStepCount,
           toolInvocationCount: agentResult.metadata.toolInvocationCount,
+          routing: agentRouting,
           steps: agentResult.metadata.steps,
           plan: agentResult.plan,
           reviewHistory: agentResult.reviewHistory,
@@ -164,10 +179,14 @@ export async function POST(request: Request) {
 
     let ragContextText: string | undefined;
     let ragMetadata: RagMetadata = { mode: "off" };
+    const effectiveRagMode = agentRouting ? "on" : parsedRequest.data.ragMode;
+    const effectiveRagContextPolicy = agentRouting
+      ? "document-diversity-v1"
+      : parsedRequest.data.ragContextPolicy;
 
-    if (parsedRequest.data.ragMode === "on") {
+    if (effectiveRagMode === "on") {
       const ragConfig = getGroundedGenerationRagConfig();
-      const contextPolicy = parsedRequest.data.ragContextPolicy;
+      const contextPolicy = effectiveRagContextPolicy;
       const candidateTopK = getCandidateTopKForContextPolicy(contextPolicy);
       const retrievalStartedAtMs = getTimerNow();
       const retrieval = await ragRetriever.retrieveRagChunks({
@@ -253,6 +272,7 @@ export async function POST(request: Request) {
       outputTokens: updatedRecord.outputTokens,
       totalTokens: updatedRecord.totalTokens,
       rag: updatedRecord.rag,
+      agentRouting,
       createdAt: updatedRecord.createdAt
     });
   } catch (error) {

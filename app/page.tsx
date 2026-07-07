@@ -11,6 +11,7 @@ import type {
   RagMode,
   RagSource
 } from "@/lib/schema";
+import type { AgentRoutingDecision } from "@/lib/agent/routing";
 
 type AgentStepTrace = {
   stepName: string;
@@ -102,6 +103,7 @@ type GeneratedResponse = GenerationOutput & {
   totalTokens?: number;
   clientElapsedMs?: number;
   rag?: RagMetadata;
+  agentRouting?: AgentRoutingDecision;
   agent?: AgentWorkflowMetadata;
 };
 
@@ -446,6 +448,7 @@ function ResultView({
     | "rag"
   > & {
     clientElapsedMs?: number;
+    agentRouting?: AgentRoutingDecision;
     agent?: AgentWorkflowMetadata;
   };
 }) {
@@ -467,8 +470,26 @@ function ResultView({
           <dl className="meta-list">
             <div>
               <dt>Mode</dt>
-              <dd>{meta.agent ? "Agent workflow" : "Single-pass"}</dd>
+              <dd>
+                {meta.agent
+                  ? "Agent workflow"
+                  : meta.agentRouting
+                    ? "Routed single-pass"
+                    : "Single-pass"}
+              </dd>
             </div>
+            {meta.agentRouting ? (
+              <>
+                <div>
+                  <dt>Routing</dt>
+                  <dd>{meta.agentRouting.mode}</dd>
+                </div>
+                <div>
+                  <dt>Routing policy</dt>
+                  <dd>{meta.agentRouting.policyVersion}</dd>
+                </div>
+              </>
+            ) : null}
             <div>
               <dt>Provider</dt>
               <dd>{meta.provider}</dd>
@@ -692,7 +713,7 @@ export default function Home() {
           "Content-Type": "application/json"
         },
         body: JSON.stringify(
-          agentMode === "on"
+          agentMode !== "off"
             ? { inputText, agentMode }
             : { inputText, agentMode, ragMode, ragContextPolicy }
         )
@@ -743,6 +764,7 @@ export default function Home() {
           outputTokens: result.outputTokens,
           totalTokens: result.totalTokens,
           rag: result.rag,
+          agentRouting: result.agentRouting,
           agent: result.agent,
           clientElapsedMs: result.clientElapsedMs
         }
@@ -805,6 +827,13 @@ export default function Home() {
                 >
                   Agent
                 </button>
+                <button
+                  className={agentMode === "auto" ? "segment active" : "segment"}
+                  type="button"
+                  onClick={() => setAgentMode("auto")}
+                >
+                  Auto
+                </button>
               </div>
             </div>
             {agentMode === "off" ? (
@@ -836,6 +865,11 @@ export default function Home() {
             {agentMode === "on" ? (
               <div className="agent-mode-note">
                 Agent workflow: heading-aware-v1 / document-diversity-v1 / candidate Top K 10
+              </div>
+            ) : null}
+            {agentMode === "auto" ? (
+              <div className="agent-mode-note">
+                Auto routing: deterministic policy chooses single-pass RAG or Agent workflow.
               </div>
             ) : null}
             {agentMode === "off" && ragMode === "on" ? (
