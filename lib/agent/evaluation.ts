@@ -25,7 +25,11 @@ import {
   runAgentWorkflow,
   type AgentWorkflowDependencies
 } from "./orchestrator";
-import { createAgentRoutingDecision } from "./routing";
+import {
+  agentRoutingDecisionSchema,
+  createAgentRoutingDecision,
+  type AgentRoutingDecision
+} from "./routing";
 import {
   agentPlanSchema,
   agentReviewHistoryEntrySchema,
@@ -75,6 +79,34 @@ export const agentEvaluationManualScoreTemplatePath = path.join(
   agentEvaluationDirectory,
   "phase_1_e_manual_score_template.md"
 );
+export const agentRoutingEvaluationRawBundlePath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_a_raw_bundle.json"
+);
+export const agentRoutingEvaluationBlindBundlePath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_a_blind_bundle.json"
+);
+export const agentRoutingEvaluationSampleMappingPath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_a_sample_mapping.json"
+);
+export const agentRoutingEvaluationManualScoresPath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_a_manual_scores.json"
+);
+export const agentRoutingEvaluationSummaryPath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_a_summary.json"
+);
+export const agentRoutingEvaluationReportPath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_a_report.md"
+);
+export const agentRoutingEvaluationManualScoreTemplatePath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_a_manual_score_template.md"
+);
 
 const manualScoreAxisNames = [
   "productSpecificRuleCoverage",
@@ -87,6 +119,8 @@ const manualScoreAxisNames = [
 ] as const;
 
 const evaluationModeSchema = z.enum(["off", "on"]);
+const routingEvaluationModeSchema = z.enum(["off", "on", "routed"]);
+const routingExecutionModeSchema = z.enum(["single_pass", "agent_workflow"]);
 
 export const agentEvaluationCaseSchema = z.object({
   caseId: z.string().regex(/^AGENT-\d{3}$/),
@@ -243,6 +277,46 @@ export const plannedEvaluationRunSchema = z.object({
   mode: evaluationModeSchema
 });
 
+export const plannedRoutingEvaluationRunSchema = plannedEvaluationRunSchema.extend({
+  mode: routingEvaluationModeSchema
+});
+
+export const rawRoutingEvaluationRunSchema = rawEvaluationRunSchema.extend({
+  mode: routingEvaluationModeSchema,
+  routing: agentRoutingDecisionSchema.optional(),
+  routedExecutionMode: routingExecutionModeSchema.optional()
+});
+
+export const rawRoutingEvaluationBundleSchema = z.object({
+  evaluationId: z.literal("agent-phase-2-a-routing"),
+  createdAt: z.string().datetime(),
+  runMatrix: z.object({
+    totalRuns: z.literal(24),
+    offRuns: z.literal(8),
+    onRuns: z.literal(8),
+    routedRuns: z.literal(8)
+  }),
+  cases: agentEvaluationCasesSchema,
+  runs: z.array(rawRoutingEvaluationRunSchema).length(24)
+});
+
+export const routingSampleMappingEntrySchema = sampleMappingEntrySchema.extend({
+  mode: routingEvaluationModeSchema
+});
+
+export const routingSampleMappingFileSchema = sampleMappingFileSchema.extend({
+  evaluationId: z.literal("agent-phase-2-a-routing"),
+  mappings: z.array(routingSampleMappingEntrySchema)
+});
+
+export const blindRoutingEvaluationBundleSchema = blindEvaluationBundleSchema.extend({
+  evaluationId: z.literal("agent-phase-2-a-routing")
+});
+
+export const routingManualScoresFileSchema = manualScoresFileSchema.extend({
+  evaluationId: z.literal("agent-phase-2-a-routing")
+});
+
 export type AgentEvaluationCase = z.infer<typeof agentEvaluationCaseSchema>;
 export type PlannedEvaluationRun = z.infer<typeof plannedEvaluationRunSchema>;
 export type RawEvaluationRun = z.infer<typeof rawEvaluationRunSchema>;
@@ -251,6 +325,24 @@ export type BlindEvaluationBundle = z.infer<typeof blindEvaluationBundleSchema>;
 export type SampleMappingFile = z.infer<typeof sampleMappingFileSchema>;
 export type ManualScoresFile = z.infer<typeof manualScoresFileSchema>;
 export type ManualQualityScore = z.infer<typeof manualQualityScoreSchema>;
+export type RoutingEvaluationMode = z.infer<typeof routingEvaluationModeSchema>;
+export type RoutingExecutionMode = z.infer<typeof routingExecutionModeSchema>;
+export type PlannedRoutingEvaluationRun = z.infer<
+  typeof plannedRoutingEvaluationRunSchema
+>;
+export type RawRoutingEvaluationRun = z.infer<typeof rawRoutingEvaluationRunSchema>;
+export type RawRoutingEvaluationBundle = z.infer<
+  typeof rawRoutingEvaluationBundleSchema
+>;
+export type BlindRoutingEvaluationBundle = z.infer<
+  typeof blindRoutingEvaluationBundleSchema
+>;
+export type RoutingSampleMappingFile = z.infer<
+  typeof routingSampleMappingFileSchema
+>;
+export type RoutingManualScoresFile = z.infer<
+  typeof routingManualScoresFileSchema
+>;
 
 type ExecuteRunResult = Omit<
   RawEvaluationRun,
@@ -268,6 +360,23 @@ type ExecuteEvaluationRun = (
   testCase: AgentEvaluationCase,
   plannedRun: PlannedEvaluationRun
 ) => Promise<ExecuteRunResult>;
+
+type ExecuteRoutingRunResult = Omit<
+  RawRoutingEvaluationRun,
+  | "rawRunId"
+  | "executionOrder"
+  | "pairId"
+  | "caseId"
+  | "caseTitle"
+  | "runIndex"
+  | "mode"
+  | "requirementMemo"
+>;
+
+type ExecuteRoutingEvaluationRun = (
+  testCase: AgentEvaluationCase,
+  plannedRun: PlannedRoutingEvaluationRun
+) => Promise<ExecuteRoutingRunResult>;
 
 function getTimerNow(): number {
   try {
@@ -419,6 +528,47 @@ export function buildAgentEvaluationRunPlan(
   return runs;
 }
 
+export function buildAgentRoutingEvaluationRunPlan(
+  cases: AgentEvaluationCase[]
+): PlannedRoutingEvaluationRun[] {
+  validateAgentEvaluationCases(cases);
+  const basePlan = buildAgentEvaluationRunPlan(cases);
+  const modeOrders: RoutingEvaluationMode[][] = [
+    ["off", "on", "routed"],
+    ["on", "routed", "off"],
+    ["routed", "off", "on"]
+  ];
+  const runs: PlannedRoutingEvaluationRun[] = [];
+  const seenPairs = new Map<string, PlannedEvaluationRun>();
+
+  for (const plannedRun of basePlan) {
+    const key = `${plannedRun.caseId}:${plannedRun.runIndex}`;
+
+    if (!seenPairs.has(key)) {
+      seenPairs.set(key, plannedRun);
+    }
+  }
+
+  for (const [pairIndex, pair] of [...seenPairs.values()].entries()) {
+    const pairNumber = pairIndex + 1;
+    const modeOrder = modeOrders[pairIndex % modeOrders.length];
+
+    for (const mode of modeOrder) {
+      const executionOrder = runs.length + 1;
+      runs.push({
+        rawRunId: `ROUTE-RUN-${String(executionOrder).padStart(3, "0")}`,
+        executionOrder,
+        pairId: `ROUTE-PAIR-${String(pairNumber).padStart(3, "0")}`,
+        caseId: pair.caseId,
+        runIndex: pair.runIndex,
+        mode
+      });
+    }
+  }
+
+  return runs;
+}
+
 export function buildAgentOffRequest(testCase: AgentEvaluationCase) {
   return {
     inputText: testCase.requirementMemo,
@@ -487,6 +637,24 @@ function buildRawRun(input: {
   });
 }
 
+function buildRoutingRawRun(input: {
+  plannedRun: PlannedRoutingEvaluationRun;
+  testCase: AgentEvaluationCase;
+  result: ExecuteRoutingRunResult;
+}): RawRoutingEvaluationRun {
+  return rawRoutingEvaluationRunSchema.parse({
+    rawRunId: input.plannedRun.rawRunId,
+    executionOrder: input.plannedRun.executionOrder,
+    pairId: input.plannedRun.pairId,
+    caseId: input.testCase.caseId,
+    caseTitle: input.testCase.title,
+    runIndex: input.plannedRun.runIndex,
+    mode: input.plannedRun.mode,
+    requirementMemo: input.testCase.requirementMemo,
+    ...input.result
+  });
+}
+
 export async function executeAgentEvaluationRunPlan(input: {
   cases: AgentEvaluationCase[];
   executeOff?: ExecuteEvaluationRun;
@@ -521,6 +689,51 @@ export async function executeAgentEvaluationRunPlan(input: {
       totalRuns: 16,
       offRuns: 8,
       onRuns: 8
+    },
+    cases,
+    runs
+  });
+}
+
+export async function executeAgentRoutingEvaluationRunPlan(input: {
+  cases: AgentEvaluationCase[];
+  executeOff?: ExecuteRoutingEvaluationRun;
+  executeOn?: ExecuteRoutingEvaluationRun;
+  executeRouted?: ExecuteRoutingEvaluationRun;
+  createdAt?: string;
+}): Promise<RawRoutingEvaluationBundle> {
+  const cases = validateAgentEvaluationCases(input.cases);
+  const caseById = new Map(cases.map((testCase) => [testCase.caseId, testCase]));
+  const plannedRuns = buildAgentRoutingEvaluationRunPlan(cases);
+  const runs: RawRoutingEvaluationRun[] = [];
+  const executeOff = input.executeOff ?? executeAgentOffRun;
+  const executeOn = input.executeOn ?? executeAgentOnRun;
+  const executeRouted = input.executeRouted ?? executeAgentRoutedRun;
+
+  for (const plannedRun of plannedRuns) {
+    const testCase = caseById.get(plannedRun.caseId);
+
+    if (!testCase) {
+      throw new Error(`Unknown planned caseId: ${plannedRun.caseId}`);
+    }
+
+    const result =
+      plannedRun.mode === "off"
+        ? await executeOff(testCase, plannedRun)
+        : plannedRun.mode === "on"
+          ? await executeOn(testCase, plannedRun)
+          : await executeRouted(testCase, plannedRun);
+    runs.push(buildRoutingRawRun({ plannedRun, testCase, result }));
+  }
+
+  return rawRoutingEvaluationBundleSchema.parse({
+    evaluationId: "agent-phase-2-a-routing",
+    createdAt: input.createdAt ?? new Date().toISOString(),
+    runMatrix: {
+      totalRuns: 24,
+      offRuns: 8,
+      onRuns: 8,
+      routedRuns: 8
     },
     cases,
     runs
@@ -621,6 +834,107 @@ async function executeAgentOnRun(
   return executeAgentOnRunWithDependencies(testCase, createRealAgentWorkflowDependencies());
 }
 
+async function executeAgentRoutedRun(
+  testCase: AgentEvaluationCase
+): Promise<ExecuteRoutingRunResult> {
+  const request = buildAgentRoutedRequest(testCase);
+  const routing = buildAgentRoutingDecisionForEvaluation(testCase);
+  assertNoEvaluationRubricLeak(request);
+
+  if (routing.mode === "single_pass") {
+    return executeRoutedSinglePassRun(testCase, routing);
+  }
+
+  return executeRoutedAgentRun(testCase, routing, createRealAgentWorkflowDependencies());
+}
+
+async function executeRoutedSinglePassRun(
+  testCase: AgentEvaluationCase,
+  routing: AgentRoutingDecision
+): Promise<ExecuteRoutingRunResult> {
+  const request = buildAgentRoutedRequest(testCase);
+  const startedAtMs = getTimerNow();
+
+  try {
+    const ragMetadata = await retrieveRagMetadataForSinglePass(
+      request.inputText,
+      "document-diversity-v1"
+    );
+    const result = await generateFromRequirementMemo(request.inputText, {
+      ragContextText: ragMetadata.contextText
+    });
+
+    return {
+      request,
+      status: "completed",
+      provider: result.provider,
+      modelName: result.modelName,
+      promptVersion: result.promptVersion,
+      evaluationElapsedMs: toNonNegativeDurationMs(startedAtMs),
+      finalOutput: result.output,
+      rag: ragMetadata.metadata,
+      usage: {
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        totalTokens: result.totalTokens
+      },
+      routing,
+      routedExecutionMode: "single_pass"
+    };
+  } catch (error) {
+    return {
+      request,
+      status: "failed",
+      promptVersion: getPromptVersion(),
+      evaluationElapsedMs: toNonNegativeDurationMs(startedAtMs),
+      routing,
+      routedExecutionMode: "single_pass",
+      error: {
+        message: error instanceof Error ? error.message : String(error)
+      }
+    };
+  }
+}
+
+async function executeRoutedAgentRun(
+  testCase: AgentEvaluationCase,
+  routing: AgentRoutingDecision,
+  dependencies: AgentWorkflowDependencies
+): Promise<ExecuteRoutingRunResult> {
+  const request = buildAgentRoutedRequest(testCase);
+  const startedAtMs = getTimerNow();
+
+  try {
+    const result = await runAgentWorkflow({
+      requirementMemo: request.inputText,
+      dependencies
+    });
+    const rawResult = toAgentRawRunResult({
+      request,
+      result,
+      evaluationElapsedMs: toNonNegativeDurationMs(startedAtMs)
+    });
+
+    return {
+      ...rawResult,
+      routing,
+      routedExecutionMode: "agent_workflow"
+    };
+  } catch (error) {
+    return {
+      request,
+      status: "failed",
+      promptVersion: "agent-poc-workflow-v1",
+      evaluationElapsedMs: toNonNegativeDurationMs(startedAtMs),
+      routing,
+      routedExecutionMode: "agent_workflow",
+      error: {
+        message: error instanceof Error ? error.message : String(error)
+      }
+    };
+  }
+}
+
 export async function executeAgentOnRunWithDependencies(
   testCase: AgentEvaluationCase,
   dependencies: AgentWorkflowDependencies
@@ -654,7 +968,7 @@ export async function executeAgentOnRunWithDependencies(
 }
 
 function toAgentRawRunResult(input: {
-  request: ReturnType<typeof buildAgentOnRequest>;
+  request: ReturnType<typeof buildAgentOnRequest> | ReturnType<typeof buildAgentRoutedRequest>;
   result: AgentRunResult;
   evaluationElapsedMs: number;
 }): ExecuteRunResult {
@@ -727,7 +1041,10 @@ function aggregateAgentStepUsage(
   };
 }
 
-function requireCompletedOutput(run: RawEvaluationRun): GenerationOutput {
+function requireCompletedOutput(run: {
+  rawRunId: string;
+  finalOutput?: GenerationOutput;
+}): GenerationOutput {
   if (!run.finalOutput) {
     throw new Error(`Raw run does not contain finalOutput: ${run.rawRunId}`);
   }
@@ -798,9 +1115,73 @@ export function createBlindBundleAndMapping(
   };
 }
 
-export function assertBlindBundleHasNoModeLeak(
-  blindBundle: BlindEvaluationBundle
-) {
+export function createBlindRoutingBundleAndMapping(
+  rawBundle: RawRoutingEvaluationBundle
+): {
+  blindBundle: BlindRoutingEvaluationBundle;
+  mappingFile: RoutingSampleMappingFile;
+} {
+  const caseById = new Map(
+    rawBundle.cases.map((testCase) => [testCase.caseId, testCase])
+  );
+  const completedRuns = rawBundle.runs.filter((run) => run.finalOutput);
+  const orderedRuns = [...completedRuns].sort((a, b) => {
+    const hashA = stableHash(
+      `agent-phase-2-a-routing-blind-v1:${a.rawRunId}:${a.caseId}:${a.mode}`
+    );
+    const hashB = stableHash(
+      `agent-phase-2-a-routing-blind-v1:${b.rawRunId}:${b.caseId}:${b.mode}`
+    );
+    return hashA.localeCompare(hashB);
+  });
+  const createdAt = new Date().toISOString();
+  const samples = orderedRuns.map((run, index) => {
+    const testCase = caseById.get(run.caseId);
+
+    if (!testCase) {
+      throw new Error(`Unknown raw run caseId: ${run.caseId}`);
+    }
+
+    return {
+      sampleId: `SAMPLE-${String(index + 1).padStart(3, "0")}`,
+      caseId: testCase.caseId,
+      caseTitle: testCase.title,
+      requirementMemo: testCase.requirementMemo,
+      expectations: {
+        expectedRelevantDocumentIds: testCase.expectedRelevantDocumentIds,
+        importantExpectedRules: testCase.importantExpectedRules,
+        unsupportedAssumptionsToAvoid: testCase.unsupportedAssumptionsToAvoid,
+        crossFieldConsistencyChecks: testCase.crossFieldConsistencyChecks
+      },
+      finalOutput: requireCompletedOutput(run)
+    };
+  });
+  const mappings = orderedRuns.map((run, index) => ({
+    sampleId: `SAMPLE-${String(index + 1).padStart(3, "0")}`,
+    rawRunId: run.rawRunId,
+    pairId: run.pairId,
+    caseId: run.caseId,
+    runIndex: run.runIndex,
+    mode: run.mode,
+    executionOrder: run.executionOrder
+  }));
+
+  return {
+    blindBundle: blindRoutingEvaluationBundleSchema.parse({
+      evaluationId: "agent-phase-2-a-routing",
+      createdAt,
+      scoringMethod: "blind-manual",
+      samples
+    }),
+    mappingFile: routingSampleMappingFileSchema.parse({
+      evaluationId: "agent-phase-2-a-routing",
+      createdAt,
+      mappings
+    })
+  };
+}
+
+export function assertBlindBundleHasNoModeLeak(blindBundle: unknown) {
   const serializedBundle = JSON.stringify(blindBundle);
   const forbiddenMarkers = [
     "agentMode",
@@ -827,9 +1208,9 @@ export function assertBlindBundleHasNoModeLeak(
   }
 }
 
-export function createManualScoreTemplate(
-  blindBundle: BlindEvaluationBundle
-): string {
+export function createManualScoreTemplate(blindBundle: {
+  samples: Array<{ sampleId: string }>;
+}): string {
   return [
     "# Phase 1-E Blind Manual Score Template",
     "",
@@ -877,6 +1258,32 @@ export function validateManualScores(
   return parsedScores;
 }
 
+export function validateRoutingManualScores(
+  manualScores: RoutingManualScoresFile,
+  blindBundle: BlindRoutingEvaluationBundle
+): RoutingManualScoresFile {
+  const parsedScores = routingManualScoresFileSchema.parse(manualScores);
+  const expectedSampleIds = blindBundle.samples.map((sample) => sample.sampleId);
+  const actualSampleIds = parsedScores.scores.map((score) => score.sampleId);
+
+  assertUniqueStrings(actualSampleIds, "routing manual score sampleIds");
+
+  const expectedSet = new Set(expectedSampleIds);
+  const actualSet = new Set(actualSampleIds);
+  const unknownSample = actualSampleIds.find((sampleId) => !expectedSet.has(sampleId));
+  const missingSample = expectedSampleIds.find((sampleId) => !actualSet.has(sampleId));
+
+  if (unknownSample) {
+    throw new Error(`Routing manual score contains unknown sampleId: ${unknownSample}`);
+  }
+
+  if (missingSample) {
+    throw new Error(`Routing manual score is missing sampleId: ${missingSample}`);
+  }
+
+  return parsedScores;
+}
+
 function averageManualScore(scores: ManualQualityScore): number {
   return (
     manualScoreAxisNames.reduce((sum, axis) => sum + scores[axis], 0) /
@@ -885,6 +1292,13 @@ function averageManualScore(scores: ManualQualityScore): number {
 }
 
 function modeRuns(rawBundle: RawEvaluationBundle, mode: "off" | "on") {
+  return rawBundle.runs.filter((run) => run.mode === mode);
+}
+
+function routingModeRuns(
+  rawBundle: RawRoutingEvaluationBundle,
+  mode: RoutingEvaluationMode
+) {
   return rawBundle.runs.filter((run) => run.mode === mode);
 }
 
@@ -977,6 +1391,125 @@ export function aggregateQualityScores(input: {
   };
 }
 
+function getRoutingScoreByMode(input: {
+  rawBundle: RawRoutingEvaluationBundle;
+  mappingFile: RoutingSampleMappingFile;
+  manualScores: RoutingManualScoresFile;
+}) {
+  const runByRawId = new Map(
+    input.rawBundle.runs.map((run) => [run.rawRunId, run])
+  );
+  const scoreBySampleId = new Map(
+    input.manualScores.scores.map((score) => [score.sampleId, score])
+  );
+
+  return input.mappingFile.mappings.map((mapping) => {
+    const score = scoreBySampleId.get(mapping.sampleId);
+    const run = runByRawId.get(mapping.rawRunId);
+
+    if (!score || !run) {
+      throw new Error(`Unable to join routing manual score for sample: ${mapping.sampleId}`);
+    }
+
+    return {
+      mapping,
+      run,
+      score
+    };
+  });
+}
+
+export function aggregateRoutingQualityScores(input: {
+  rawBundle: RawRoutingEvaluationBundle;
+  mappingFile: RoutingSampleMappingFile;
+  manualScores: RoutingManualScoresFile;
+}) {
+  const joinedScores = getRoutingScoreByMode(input);
+  const byMode = (mode: RoutingEvaluationMode) =>
+    joinedScores.filter((entry) => entry.mapping.mode === mode);
+  const sampleAverageByMode = (mode: RoutingEvaluationMode) =>
+    byMode(mode).map((entry) => averageManualScore(entry.score.scores));
+  const axisSummaries = Object.fromEntries(
+    manualScoreAxisNames.map((axis) => {
+      const offValues = byMode("off").map((entry) => entry.score.scores[axis]);
+      const onValues = byMode("on").map((entry) => entry.score.scores[axis]);
+      const routedValues = byMode("routed").map(
+        (entry) => entry.score.scores[axis]
+      );
+      const offMean = mean(offValues);
+      const onMean = mean(onValues);
+      const routedMean = mean(routedValues);
+
+      return [
+        axis,
+        {
+          offMean,
+          onMean,
+          routedMean,
+          routedMinusOff:
+            routedMean !== undefined && offMean !== undefined
+              ? routedMean - offMean
+              : undefined,
+          routedMinusOn:
+            routedMean !== undefined && onMean !== undefined
+              ? routedMean - onMean
+              : undefined
+        }
+      ];
+    })
+  );
+  const pairSummaries = pairRoutingJoinedScores(joinedScores);
+  const routedVsOffWinTieLoss = pairSummaries.reduce(
+    (summary, pair) => {
+      if (pair.routedAverage > pair.offAverage) {
+        summary.routedWins += 1;
+      } else if (pair.routedAverage < pair.offAverage) {
+        summary.offWins += 1;
+      } else {
+        summary.ties += 1;
+      }
+
+      return summary;
+    },
+    { routedWins: 0, offWins: 0, ties: 0 }
+  );
+  const routedVsOnWinTieLoss = pairSummaries.reduce(
+    (summary, pair) => {
+      if (pair.routedAverage > pair.onAverage) {
+        summary.routedWins += 1;
+      } else if (pair.routedAverage < pair.onAverage) {
+        summary.onWins += 1;
+      } else {
+        summary.ties += 1;
+      }
+
+      return summary;
+    },
+    { routedWins: 0, onWins: 0, ties: 0 }
+  );
+
+  return {
+    modeSummary: {
+      off: {
+        mean: mean(sampleAverageByMode("off")),
+        median: median(sampleAverageByMode("off"))
+      },
+      on: {
+        mean: mean(sampleAverageByMode("on")),
+        median: median(sampleAverageByMode("on"))
+      },
+      routed: {
+        mean: mean(sampleAverageByMode("routed")),
+        median: median(sampleAverageByMode("routed"))
+      }
+    },
+    axisSummaries,
+    routedVsOffWinTieLoss,
+    routedVsOnWinTieLoss,
+    pairSummaries
+  };
+}
+
 function pairJoinedScores(
   joinedScores: ReturnType<typeof getScoreByMode>
 ): Array<{
@@ -1012,6 +1545,53 @@ function pairJoinedScores(
       offAverage,
       onAverage,
       delta: onAverage - offAverage
+    };
+  });
+}
+
+function pairRoutingJoinedScores(
+  joinedScores: ReturnType<typeof getRoutingScoreByMode>
+): Array<{
+  pairId: string;
+  caseId: string;
+  runIndex: number;
+  offAverage: number;
+  onAverage: number;
+  routedAverage: number;
+  routedMinusOff: number;
+  routedMinusOn: number;
+}> {
+  const grouped = new Map<string, typeof joinedScores>();
+
+  for (const entry of joinedScores) {
+    const key = `${entry.mapping.caseId}:${entry.mapping.runIndex}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), entry]);
+  }
+
+  return [...grouped.values()].map((entries) => {
+    const offEntry = entries.find((entry) => entry.mapping.mode === "off");
+    const onEntry = entries.find((entry) => entry.mapping.mode === "on");
+    const routedEntry = entries.find((entry) => entry.mapping.mode === "routed");
+
+    if (!offEntry || !onEntry || !routedEntry) {
+      throw new Error(
+        "Routing manual scores must include OFF, ON, and routed for each pair."
+      );
+    }
+
+    const offAverage = averageManualScore(offEntry.score.scores);
+    const onAverage = averageManualScore(onEntry.score.scores);
+    const routedAverage = averageManualScore(routedEntry.score.scores);
+
+    return {
+      pairId: offEntry.mapping.pairId,
+      caseId: offEntry.mapping.caseId,
+      runIndex: offEntry.mapping.runIndex,
+      offAverage,
+      onAverage,
+      routedAverage,
+      routedMinusOff: routedAverage - offAverage,
+      routedMinusOn: routedAverage - onAverage
     };
   });
 }
@@ -1203,6 +1783,106 @@ export function aggregateLatencyAndUsage(rawBundle: RawEvaluationBundle) {
   };
 }
 
+export function aggregateRoutingDecisionMetrics(
+  rawBundle: RawRoutingEvaluationBundle
+) {
+  const routedRuns = routingModeRuns(rawBundle, "routed");
+  const agentWorkflowRuns = routedRuns.filter(
+    (run) => run.routedExecutionMode === "agent_workflow"
+  );
+  const singlePassRuns = routedRuns.filter(
+    (run) => run.routedExecutionMode === "single_pass"
+  );
+  const reasonCounts = countBy(
+    routedRuns.flatMap((run) => run.routing?.reasons ?? [])
+  );
+  const decisionModeCounts = countBy(
+    routedRuns.map((run) => run.routing?.mode ?? "missing")
+  );
+
+  return {
+    routedRunCount: routedRuns.length,
+    agentInvocationRate:
+      routedRuns.length > 0 ? agentWorkflowRuns.length / routedRuns.length : undefined,
+    avoidedAgentRate:
+      routedRuns.length > 0 ? singlePassRuns.length / routedRuns.length : undefined,
+    decisionModeCounts,
+    routedExecutionModeCounts: {
+      agent_workflow: agentWorkflowRuns.length,
+      single_pass: singlePassRuns.length
+    },
+    reasonCounts
+  };
+}
+
+export function aggregateRoutingLatencyAndUsage(
+  rawBundle: RawRoutingEvaluationBundle
+) {
+  const summarizeMode = (mode: RoutingEvaluationMode) => {
+    const runs = routingModeRuns(rawBundle, mode);
+
+    return {
+      evaluationElapsedMs: {
+        mean: mean(runs.map((run) => run.evaluationElapsedMs)),
+        median: median(runs.map((run) => run.evaluationElapsedMs))
+      },
+      inputTokens: {
+        mean: mean(
+          runs
+            .map((run) => run.usage?.inputTokens)
+            .filter((value): value is number => value !== undefined)
+        )
+      },
+      outputTokens: {
+        mean: mean(
+          runs
+            .map((run) => run.usage?.outputTokens)
+            .filter((value): value is number => value !== undefined)
+        )
+      },
+      totalTokens: {
+        mean: mean(
+          runs
+            .map((run) => run.usage?.totalTokens)
+            .filter((value): value is number => value !== undefined)
+        )
+      },
+      retrievalLatencyMs: {
+        mean: mean(
+          runs
+            .map((run) =>
+              run.rag?.mode === "on" ? run.rag.retrievalLatencyMs : undefined
+            )
+            .filter((value): value is number => value !== undefined)
+        )
+      }
+    };
+  };
+  const off = summarizeMode("off");
+  const on = summarizeMode("on");
+  const routed = summarizeMode("routed");
+  const routedVsAlwaysOnElapsedRatio =
+    routed.evaluationElapsedMs.mean !== undefined &&
+    on.evaluationElapsedMs.mean !== undefined &&
+    on.evaluationElapsedMs.mean > 0
+      ? routed.evaluationElapsedMs.mean / on.evaluationElapsedMs.mean
+      : undefined;
+  const routedVsAlwaysOnTokenRatio =
+    routed.totalTokens.mean !== undefined &&
+    on.totalTokens.mean !== undefined &&
+    on.totalTokens.mean > 0
+      ? routed.totalTokens.mean / on.totalTokens.mean
+      : undefined;
+
+  return {
+    off,
+    on,
+    routed,
+    routedVsAlwaysOnElapsedRatio,
+    routedVsAlwaysOnTokenRatio
+  };
+}
+
 export function createRevisionPairs(rawBundle: RawEvaluationBundle) {
   const revisionRuns = rawBundle.runs.filter(
     (run) => run.mode === "on" && (run.agent?.metadata.revisionCount ?? 0) > 0
@@ -1258,6 +1938,33 @@ export function createEvaluationSummary(input: {
   };
 }
 
+export function createRoutingEvaluationSummary(input: {
+  rawBundle: RawRoutingEvaluationBundle;
+  blindBundle: BlindRoutingEvaluationBundle;
+  mappingFile: RoutingSampleMappingFile;
+  manualScores: RoutingManualScoresFile;
+}) {
+  const validatedScores = validateRoutingManualScores(
+    input.manualScores,
+    input.blindBundle
+  );
+  const quality = aggregateRoutingQualityScores({
+    rawBundle: input.rawBundle,
+    mappingFile: input.mappingFile,
+    manualScores: validatedScores
+  });
+
+  return {
+    evaluationId: "agent-phase-2-a-routing",
+    createdAt: new Date().toISOString(),
+    scoringMethod: "blind-manual",
+    runMatrix: input.rawBundle.runMatrix,
+    quality,
+    routingMetrics: aggregateRoutingDecisionMetrics(input.rawBundle),
+    latencyAndUsage: aggregateRoutingLatencyAndUsage(input.rawBundle)
+  };
+}
+
 export function createEvaluationReportMarkdown(summary: ReturnType<typeof createEvaluationSummary>) {
   return [
     "# Agent PoC Phase 1-E Evaluation Report",
@@ -1288,6 +1995,43 @@ export function createEvaluationReportMarkdown(summary: ReturnType<typeof create
     "## Scope Note",
     "",
     "These results apply only to the Phase 1-E dataset, current prompt/schema, current local environment, and manually scored blind samples."
+  ].join("\n");
+}
+
+export function createRoutingEvaluationReportMarkdown(
+  summary: ReturnType<typeof createRoutingEvaluationSummary>
+) {
+  return [
+    "# Agent PoC Phase 2-A Routing Evaluation Report",
+    "",
+    "This report was generated from the routing raw evaluation bundle, blind sample mapping, and blind manual scores.",
+    "",
+    "## Quality Summary",
+    "",
+    `- Always OFF mean: ${formatOptionalNumber(summary.quality.modeSummary.off.mean)}`,
+    `- Always ON mean: ${formatOptionalNumber(summary.quality.modeSummary.on.mean)}`,
+    `- Routed mean: ${formatOptionalNumber(summary.quality.modeSummary.routed.mean)}`,
+    `- Routed vs OFF wins: ${summary.quality.routedVsOffWinTieLoss.routedWins}`,
+    `- OFF vs routed wins: ${summary.quality.routedVsOffWinTieLoss.offWins}`,
+    `- Routed vs OFF ties: ${summary.quality.routedVsOffWinTieLoss.ties}`,
+    `- Routed vs ON wins: ${summary.quality.routedVsOnWinTieLoss.routedWins}`,
+    `- ON vs routed wins: ${summary.quality.routedVsOnWinTieLoss.onWins}`,
+    `- Routed vs ON ties: ${summary.quality.routedVsOnWinTieLoss.ties}`,
+    "",
+    "## Routing Metrics",
+    "",
+    `- Agent invocation rate: ${formatOptionalNumber(summary.routingMetrics.agentInvocationRate)}`,
+    `- Avoided Agent rate: ${formatOptionalNumber(summary.routingMetrics.avoidedAgentRate)}`,
+    `- Routed execution counts: ${JSON.stringify(summary.routingMetrics.routedExecutionModeCounts)}`,
+    "",
+    "## Cost",
+    "",
+    `- Routed / Always ON elapsed ratio: ${formatOptionalNumber(summary.latencyAndUsage.routedVsAlwaysOnElapsedRatio)}`,
+    `- Routed / Always ON token ratio: ${formatOptionalNumber(summary.latencyAndUsage.routedVsAlwaysOnTokenRatio)}`,
+    "",
+    "## Scope Note",
+    "",
+    "These results apply only to the Phase 2-A routing dataset, current prompt/schema, current local environment, and manually scored blind samples."
   ].join("\n");
 }
 

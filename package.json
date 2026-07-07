@@ -21,7 +21,9 @@
     "rag:evaluate:heading": "tsx scripts/rag-evaluate.ts heading-aware-v1",
     "agent:smoke": "tsx scripts/agent-smoke.ts",
     "agent:evaluate:run": "tsx scripts/agent-evaluate-run.ts",
-    "agent:evaluate:summarize": "tsx scripts/agent-evaluate-summarize.ts"
+    "agent:evaluate:summarize": "tsx scripts/agent-evaluate-summarize.ts",
+    "agent:routing:evaluate:run": "tsx scripts/agent-routing-evaluate-run.ts",
+    "agent:routing:evaluate:summarize": "tsx scripts/agent-routing-evaluate-summarize.ts"
   },
   "dependencies": {
     "@next/env": "^15.5.20",

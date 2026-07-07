@@ -4,23 +4,35 @@ import {
   aggregateLatencyAndUsage,
   aggregateQualityScores,
   aggregateRetrievalParity,
+  aggregateRoutingDecisionMetrics,
+  aggregateRoutingLatencyAndUsage,
+  aggregateRoutingQualityScores,
   assertBlindBundleHasNoModeLeak,
   assertNoEvaluationRubricLeak,
   buildAgentEvaluationRunPlan,
   buildAgentOffRequest,
   buildAgentOnRequest,
+  buildAgentRoutingDecisionForEvaluation,
+  buildAgentRoutingEvaluationRunPlan,
+  buildAgentRoutedRequest,
   createBlindBundleAndMapping,
+  createBlindRoutingBundleAndMapping,
   createEvaluationSummary,
   createManualScoreTemplate,
+  createRoutingEvaluationSummary,
   createRevisionPairs,
   executeAgentEvaluationRunPlan,
+  executeAgentRoutingEvaluationRunPlan,
   loadAgentEvaluationCases,
   manualScoresFileSchema,
+  routingManualScoresFileSchema,
   validateAgentEvaluationCases,
   validateManualScores,
+  validateRoutingManualScores,
   type AgentEvaluationCase,
   type ManualScoresFile,
-  type RawEvaluationRun
+  type RawEvaluationRun,
+  type RoutingManualScoresFile
 } from "@/lib/agent/evaluation";
 import type { GenerationOutput, RagMetadata } from "@/lib/schema";
 
@@ -226,6 +238,28 @@ function completeManualScores(sampleIds: string[], onWins = true): ManualScoresF
   });
 }
 
+function completeRoutingManualScores(
+  sampleIds: string[]
+): RoutingManualScoresFile {
+  return routingManualScoresFileSchema.parse({
+    evaluationId: "agent-phase-2-a-routing",
+    scoringMethod: "blind-manual",
+    scores: sampleIds.map((sampleId, index) => ({
+      sampleId,
+      scores: {
+        productSpecificRuleCoverage: index % 3 === 0 ? 5 : 4,
+        unsupportedAssumptionControl: 4,
+        acceptanceCriteriaSpecificity: 4,
+        jiraDecompositionAppropriateness: 4,
+        jsonStructureStability: 5,
+        crossFieldConsistency: index % 2 === 0 ? 5 : 4,
+        requirementToTaskTraceability: 4
+      },
+      notes: `routing note ${sampleId}`
+    }))
+  });
+}
+
 describe("Agent Phase 1-E evaluation dataset and matrix", () => {
   it("loads the six public evaluation cases and rejects duplicates", async () => {
     const cases = await loadAgentEvaluationCases();
@@ -289,6 +323,160 @@ describe("Agent Phase 1-E evaluation dataset and matrix", () => {
         importantExpectedRules: testCase.importantExpectedRules
       })
     ).toThrow("rubric leaked");
+  });
+
+  it("creates the Phase 2-A 24-run routing matrix", async () => {
+    const cases = await loadAgentEvaluationCases();
+    const plan = buildAgentRoutingEvaluationRunPlan(cases);
+
+    expect(plan).toHaveLength(24);
+    expect(plan.filter((run) => run.mode === "off")).toHaveLength(8);
+    expect(plan.filter((run) => run.mode === "on")).toHaveLength(8);
+    expect(plan.filter((run) => run.mode === "routed")).toHaveLength(8);
+    expect(plan.slice(0, 6).map((run) => run.mode)).toEqual([
+      "off",
+      "on",
+      "routed",
+      "on",
+      "routed",
+      "off"
+    ]);
+    expect(plan.map((run) => run.executionOrder)).toEqual(
+      Array.from({ length: 24 }, (_, index) => index + 1)
+    );
+  });
+
+  it("builds routed requests without leaking rubric metadata", async () => {
+    const [testCase] = await loadAgentEvaluationCases();
+    const routedRequest = buildAgentRoutedRequest(testCase);
+
+    expect(routedRequest).toEqual({
+      inputText: testCase.requirementMemo,
+      agentMode: "auto"
+    });
+    expect(() => assertNoEvaluationRubricLeak(routedRequest)).not.toThrow();
+  });
+});
+
+describe("Agent Phase 2-A routing evaluation behavior", () => {
+  async function createRoutingStubBundle() {
+    const cases = await loadAgentEvaluationCases();
+    return executeAgentRoutingEvaluationRunPlan({
+      cases,
+      createdAt: fixedCreatedAt,
+      executeOff: async (testCase, plannedRun) => ({
+        request: buildAgentOffRequest(testCase),
+        status: "completed",
+        provider: "openai",
+        modelName: "gpt-5.4-mini",
+        promptVersion: "llm-app-poc-rag-v1",
+        evaluationElapsedMs: 1000 + plannedRun.executionOrder,
+        finalOutput: sampleOutput(`off-${plannedRun.rawRunId}`),
+        rag: ragMetadata(["profile-image-spec", "profile-api"]),
+        usage: {
+          inputTokens: 100,
+          outputTokens: 200,
+          totalTokens: 300
+        }
+      }),
+      executeOn: async (testCase, plannedRun) => ({
+        request: buildAgentOnRequest(testCase),
+        status: "completed",
+        provider: "openai",
+        modelName: "gpt-5.4-mini",
+        promptVersion: "agent-poc-workflow-v1",
+        evaluationElapsedMs: 3000 + plannedRun.executionOrder,
+        finalOutput: sampleOutput(`on-${plannedRun.rawRunId}`),
+        rag: ragMetadata(["profile-image-spec", "profile-api"]),
+        usage: {
+          inputTokens: 300,
+          outputTokens: 600,
+          totalTokens: 900
+        },
+        agent: onAgent(plannedRun.runIndex)
+      }),
+      executeRouted: async (testCase, plannedRun) => {
+        const routing = buildAgentRoutingDecisionForEvaluation(testCase);
+        const routedExecutionMode =
+          testCase.caseId === "AGENT-006" ? "agent_workflow" : "single_pass";
+
+        return {
+          request: buildAgentRoutedRequest(testCase),
+          status: "completed",
+          provider: "openai",
+          modelName: "gpt-5.4-mini",
+          promptVersion:
+            routedExecutionMode === "agent_workflow"
+              ? "agent-poc-workflow-v1"
+              : "llm-app-poc-rag-v1",
+          evaluationElapsedMs:
+            routedExecutionMode === "agent_workflow"
+              ? 3000 + plannedRun.executionOrder
+              : 1000 + plannedRun.executionOrder,
+          finalOutput: sampleOutput(`routed-${plannedRun.rawRunId}`),
+          rag: ragMetadata(["profile-image-spec", "profile-api"]),
+          usage:
+            routedExecutionMode === "agent_workflow"
+              ? {
+                  inputTokens: 300,
+                  outputTokens: 600,
+                  totalTokens: 900
+                }
+              : {
+                  inputTokens: 100,
+                  outputTokens: 200,
+                  totalTokens: 300
+                },
+          agent:
+            routedExecutionMode === "agent_workflow"
+              ? onAgent(plannedRun.runIndex)
+              : undefined,
+          routing: {
+            ...routing,
+            mode: routedExecutionMode
+          },
+          routedExecutionMode
+        };
+      }
+    });
+  }
+
+  it("creates Phase 2-A raw, blind, mapping, and routing metrics without mode leaks", async () => {
+    const rawBundle = await createRoutingStubBundle();
+    const { blindBundle, mappingFile } = createBlindRoutingBundleAndMapping(rawBundle);
+    const manualScores = completeRoutingManualScores(
+      blindBundle.samples.map((sample) => sample.sampleId)
+    );
+    const quality = aggregateRoutingQualityScores({
+      rawBundle,
+      mappingFile,
+      manualScores
+    });
+    const routingMetrics = aggregateRoutingDecisionMetrics(rawBundle);
+    const latencyAndUsage = aggregateRoutingLatencyAndUsage(rawBundle);
+    const summary = createRoutingEvaluationSummary({
+      rawBundle,
+      blindBundle,
+      mappingFile,
+      manualScores
+    });
+
+    expect(rawBundle.runs).toHaveLength(24);
+    expect(rawBundle.runs.filter((run) => run.mode === "routed")).toHaveLength(8);
+    expect(blindBundle.samples).toHaveLength(24);
+    expect(mappingFile.mappings).toHaveLength(24);
+    expect(() => assertBlindBundleHasNoModeLeak(blindBundle)).not.toThrow();
+    expect(validateRoutingManualScores(manualScores, blindBundle)).toEqual(
+      manualScores
+    );
+    expect(quality.modeSummary.routed.mean).toBeGreaterThan(0);
+    expect(quality.routedVsOffWinTieLoss.routedWins + quality.routedVsOffWinTieLoss.offWins + quality.routedVsOffWinTieLoss.ties).toBe(8);
+    expect(routingMetrics.routedRunCount).toBe(8);
+    expect(routingMetrics.agentInvocationRate).toBeGreaterThan(0);
+    expect(routingMetrics.avoidedAgentRate).toBeGreaterThan(0);
+    expect(latencyAndUsage.routedVsAlwaysOnElapsedRatio).toBeLessThan(1);
+    expect(latencyAndUsage.routedVsAlwaysOnTokenRatio).toBeLessThan(1);
+    expect(summary.evaluationId).toBe("agent-phase-2-a-routing");
   });
 });
 
