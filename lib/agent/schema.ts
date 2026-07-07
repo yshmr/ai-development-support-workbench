@@ -51,7 +51,16 @@ export const agentReviewSchema = z.object({
 
 const knowledgeSourceMetadataSchema = z
   .object({
-    sourceId: z.string().min(1)
+    sourceId: z.string().min(1),
+    rank: z.number().int().positive().optional(),
+    contextRank: z.number().int().positive().optional(),
+    retrievalRank: z.number().int().positive().optional(),
+    score: z.number().optional(),
+    chunkId: z.string().min(1).optional(),
+    documentId: z.string().min(1).optional(),
+    documentTitle: z.string().min(1).optional(),
+    headingPath: z.array(z.string().min(1)).optional(),
+    sourcePath: z.string().min(1).optional()
   })
   .passthrough();
 
@@ -125,6 +134,58 @@ export const sanitizedAgentErrorSchema = z.object({
   stepName: agentStepNameSchema.optional()
 });
 
+export const agentReviewStageSchema = z.enum(["draft", "revision"]);
+
+export const agentReviewHistoryEntrySchema = z.object({
+  reviewNumber: z.number().int().positive(),
+  stage: agentReviewStageSchema,
+  review: agentReviewSchema,
+  decision: revisionDecisionSchema
+});
+
+export const agentSafeSourceSchema = z.object({
+  sourceId: z.string().min(1),
+  rank: z.number().int().positive().optional(),
+  contextRank: z.number().int().positive().optional(),
+  retrievalRank: z.number().int().positive().optional(),
+  score: z.number().optional(),
+  chunkId: z.string().min(1).optional(),
+  documentId: z.string().min(1).optional(),
+  documentTitle: z.string().min(1).optional(),
+  headingPath: z.array(z.string().min(1)).optional(),
+  sourcePath: z.string().min(1).optional()
+});
+
+export const agentRetrievalArtifactSchema = z.object({
+  retrievalMetadata: z.record(z.unknown()).optional(),
+  embeddingUsage: z
+    .object({
+      promptTokens: optionalNonNegativeNumberSchema,
+      totalTokens: optionalNonNegativeNumberSchema
+    })
+    .optional(),
+  sources: z.array(agentSafeSourceSchema)
+});
+
+export const agentRunRecordSchema = z.object({
+  runId: z.string().min(1),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  inputText: z.string().min(1),
+  provider: z.string().min(1).optional(),
+  modelName: z.string().min(1).optional(),
+  metadata: agentRunMetadataSchema,
+  plan: agentPlanSchema.optional(),
+  retrieval: agentRetrievalArtifactSchema.optional(),
+  initialDraft: generationOutputSchema.optional(),
+  revisedOutput: generationOutputSchema.optional(),
+  finalOutput: generationOutputSchema.optional(),
+  reviewHistory: z.array(agentReviewHistoryEntrySchema),
+  error: sanitizedAgentErrorSchema.optional()
+});
+
+export const agentRunHistorySchema = z.array(agentRunRecordSchema);
+
 export type AgentPlan = z.infer<typeof agentPlanSchema>;
 export type AgentReviewSeverity = z.infer<typeof agentReviewSeveritySchema>;
 export type AgentReviewCategory = z.infer<typeof agentReviewCategorySchema>;
@@ -142,13 +203,26 @@ export type AgentTerminationReason = z.infer<
 >;
 export type AgentRunMetadata = z.infer<typeof agentRunMetadataSchema>;
 export type SanitizedAgentError = z.infer<typeof sanitizedAgentErrorSchema>;
+export type AgentReviewStage = z.infer<typeof agentReviewStageSchema>;
+export type AgentReviewHistoryEntry = z.infer<
+  typeof agentReviewHistoryEntrySchema
+>;
+export type AgentSafeSource = z.infer<typeof agentSafeSourceSchema>;
+export type AgentRetrievalArtifact = z.infer<
+  typeof agentRetrievalArtifactSchema
+>;
+export type AgentRunRecord = z.infer<typeof agentRunRecordSchema>;
 
 export type AgentRunResult = {
+  runId?: string;
+  createdAt?: string;
   output?: GenerationOutput;
   initialDraft?: GenerationOutput;
+  revisedOutput?: GenerationOutput;
   plan?: AgentPlan;
   knowledge?: KnowledgeRetrievalToolResult;
   reviews: AgentReview[];
+  reviewHistory: AgentReviewHistoryEntry[];
   metadata: AgentRunMetadata;
   error?: SanitizedAgentError;
 };
@@ -218,3 +292,129 @@ export const geminiAgentPlanSchema = {
 } as const;
 
 export const anthropicAgentPlanSchema = agentPlanJsonSchema;
+
+export const agentReviewJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["summary", "findings"],
+  properties: {
+    summary: { type: "string" },
+    findings: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "findingId",
+          "category",
+          "severity",
+          "targetFields",
+          "message",
+          "requiredChange",
+          "sourceIds"
+        ],
+        properties: {
+          findingId: { type: "string" },
+          category: {
+            type: "string",
+            enum: [
+              "requirement_coverage",
+              "grounding_consistency",
+              "unsupported_assumption",
+              "cross_field_consistency",
+              "actionability"
+            ]
+          },
+          severity: {
+            type: "string",
+            enum: ["blocker", "major", "minor"]
+          },
+          targetFields: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: [
+                "summary",
+                "spec",
+                "acceptanceCriteria",
+                "jiraTasks",
+                "implementationPlan",
+                "reviewPoints",
+                "risks"
+              ]
+            }
+          },
+          message: { type: "string" },
+          requiredChange: { type: "string" },
+          sourceIds: {
+            type: "array",
+            items: { type: "string" }
+          }
+        }
+      }
+    }
+  }
+} as const;
+
+export const geminiAgentReviewSchema = {
+  type: "object",
+  required: ["summary", "findings"],
+  properties: {
+    summary: { type: "string" },
+    findings: {
+      type: "array",
+      items: {
+        type: "object",
+        required: [
+          "findingId",
+          "category",
+          "severity",
+          "targetFields",
+          "message",
+          "requiredChange",
+          "sourceIds"
+        ],
+        properties: {
+          findingId: { type: "string" },
+          category: {
+            type: "string",
+            enum: [
+              "requirement_coverage",
+              "grounding_consistency",
+              "unsupported_assumption",
+              "cross_field_consistency",
+              "actionability"
+            ]
+          },
+          severity: {
+            type: "string",
+            enum: ["blocker", "major", "minor"]
+          },
+          targetFields: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: [
+                "summary",
+                "spec",
+                "acceptanceCriteria",
+                "jiraTasks",
+                "implementationPlan",
+                "reviewPoints",
+                "risks"
+              ]
+            }
+          },
+          message: { type: "string" },
+          requiredChange: { type: "string" },
+          sourceIds: {
+            type: "array",
+            items: { type: "string" }
+          }
+        }
+      }
+    }
+  }
+} as const;
+
+export const anthropicAgentReviewSchema = agentReviewJsonSchema;

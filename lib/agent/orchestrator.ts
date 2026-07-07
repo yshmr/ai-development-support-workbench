@@ -1,9 +1,13 @@
 import { randomUUID } from "node:crypto";
 import {
   type AgentPlan,
+  type AgentRetrievalArtifact,
   type AgentReview,
+  type AgentReviewHistoryEntry,
+  type AgentRunRecord,
   type AgentRunMetadata,
   type AgentRunResult,
+  type AgentSafeSource,
   type AgentStepName,
   type AgentStepTrace,
   type KnowledgeRetrievalToolResult,
@@ -84,9 +88,14 @@ export type AgentWorkflowDependencies = {
   reviewer: AgentReviewer;
 };
 
+export type AgentRunStore = {
+  saveRun(record: AgentRunRecord): MaybePromise<AgentRunRecord>;
+};
+
 export type RunAgentWorkflowInput = {
   requirementMemo: string;
   dependencies: AgentWorkflowDependencies;
+  runStore?: AgentRunStore;
 };
 
 class AgentWorkflowRuntimeError extends Error {
@@ -150,6 +159,63 @@ function sanitizeError(error: unknown): string {
   return String(error);
 }
 
+function sanitizeSource(source: KnowledgeRetrievalToolResult["sources"][number]): AgentSafeSource {
+  return {
+    sourceId: source.sourceId,
+    rank: typeof source.rank === "number" ? source.rank : undefined,
+    contextRank:
+      typeof source.contextRank === "number" ? source.contextRank : undefined,
+    retrievalRank:
+      typeof source.retrievalRank === "number" ? source.retrievalRank : undefined,
+    score: typeof source.score === "number" ? source.score : undefined,
+    chunkId: typeof source.chunkId === "string" ? source.chunkId : undefined,
+    documentId:
+      typeof source.documentId === "string" ? source.documentId : undefined,
+    documentTitle:
+      typeof source.documentTitle === "string" ? source.documentTitle : undefined,
+    headingPath: Array.isArray(source.headingPath)
+      ? source.headingPath.filter(
+          (heading): heading is string => typeof heading === "string"
+        )
+      : undefined,
+    sourcePath:
+      typeof source.sourcePath === "string" ? source.sourcePath : undefined
+  };
+}
+
+function createRetrievalArtifact(
+  knowledge: KnowledgeRetrievalToolResult | undefined
+): AgentRetrievalArtifact | undefined {
+  if (!knowledge) {
+    return undefined;
+  }
+
+  return {
+    retrievalMetadata: knowledge.retrievalMetadata,
+    embeddingUsage: knowledge.embeddingUsage,
+    sources: knowledge.sources.map(sanitizeSource)
+  };
+}
+
+function validateReviewSourceIds(
+  review: AgentReview,
+  knowledge: KnowledgeRetrievalToolResult | undefined
+) {
+  const validSourceIds = new Set(
+    knowledge?.sources.map((source) => source.sourceId) ?? []
+  );
+  const unknownSourceId = review.findings
+    .flatMap((finding) => finding.sourceIds)
+    .find((sourceId) => !validSourceIds.has(sourceId));
+
+  if (unknownSourceId) {
+    throw new AgentWorkflowRuntimeError(
+      `AgentReview referenced unknown sourceId: ${unknownSourceId}`,
+      "review"
+    );
+  }
+}
+
 function createMetadata(input: {
   status: AgentRunMetadata["status"];
   finalState: AgentStateName;
@@ -178,11 +244,15 @@ function createMetadata(input: {
 
 export async function runAgentWorkflow({
   requirementMemo,
-  dependencies
+  dependencies,
+  runStore
 }: RunAgentWorkflowInput): Promise<AgentRunResult> {
+  const runId = randomUUID();
+  const createdAt = new Date().toISOString();
   const runStartedAtMs = getTimerNow();
   const steps: AgentStepTrace[] = [];
   const reviews: AgentReview[] = [];
+  const reviewHistory: AgentReviewHistoryEntry[] = [];
   let state: AgentStateName = "initialized";
   let revisionCount = 0;
   let reviewCount = 0;
@@ -191,6 +261,7 @@ export async function runAgentWorkflow({
   let plan: AgentPlan | undefined;
   let knowledge: KnowledgeRetrievalToolResult | undefined;
   let initialDraft: GenerationOutput | undefined;
+  let revisedOutput: GenerationOutput | undefined;
   let currentOutput: GenerationOutput | undefined;
   let activeStepName: AgentStepName | undefined;
 
@@ -300,39 +371,77 @@ export async function runAgentWorkflow({
   ): Promise<AgentRunResult> => {
     transitionTo("finalizing");
     await runStep("finalization", () => undefined, () => undefined);
-    transitionTo(finalStatus);
-
-    return {
+    const metadata = createMetadata({
+      status: finalStatus,
+      finalState: finalStatus,
+      revisionCount,
+      reviewCount,
+      terminationReason,
+      totalAgentLatencyMs: toNonNegativeDurationMs(runStartedAtMs),
+      llmStepCount,
+      toolInvocationCount,
+      steps
+    });
+    const result: AgentRunResult = {
+      runId,
+      createdAt,
       output: currentOutput,
       initialDraft,
+      revisedOutput,
       plan,
       knowledge,
       reviews,
-      metadata: createMetadata({
-        status: finalStatus,
-        finalState: state,
-        revisionCount,
-        reviewCount,
-        terminationReason,
-        totalAgentLatencyMs: toNonNegativeDurationMs(runStartedAtMs),
-        llmStepCount,
-        toolInvocationCount,
-        steps
-      })
+      reviewHistory,
+      metadata
+    };
+
+    if (runStore) {
+      await runStore.saveRun(createRunRecord(result));
+    }
+
+    transitionTo(finalStatus);
+    result.metadata.finalState = state;
+    return result;
+  };
+
+  const createRunRecord = (result: AgentRunResult): AgentRunRecord => {
+    const providerStep = result.metadata.steps.find(
+      (step) => step.providerBacked === true
+    );
+
+    return {
+      runId,
+      createdAt,
+      updatedAt: new Date().toISOString(),
+      inputText: requirementMemo,
+      provider: providerStep?.provider,
+      modelName: providerStep?.modelName,
+      metadata: result.metadata,
+      plan: result.plan,
+      retrieval: createRetrievalArtifact(result.knowledge),
+      initialDraft: result.initialDraft,
+      revisedOutput: result.revisedOutput,
+      finalOutput: result.output,
+      reviewHistory: result.reviewHistory,
+      error: result.error
     };
   };
 
-  const failClosed = (error: unknown): AgentRunResult => {
+  const failClosed = async (error: unknown): Promise<AgentRunResult> => {
     if (state !== "failed") {
       transitionTo("failed");
     }
 
-    return {
+    const result: AgentRunResult = {
+      runId,
+      createdAt,
       output: currentOutput,
       initialDraft,
+      revisedOutput,
       plan,
       knowledge,
       reviews,
+      reviewHistory,
       metadata: createMetadata({
         status: "failed",
         finalState: state,
@@ -349,6 +458,16 @@ export async function runAgentWorkflow({
         stepName: activeStepName
       }
     };
+
+    if (runStore) {
+      try {
+        await runStore.saveRun(createRunRecord(result));
+      } catch {
+        // The workflow is already failed. Avoid logging sensitive fallback data.
+      }
+    }
+
+    return result;
   };
 
   try {
@@ -405,13 +524,23 @@ export async function runAgentWorkflow({
             knowledge: knowledge!,
             output: currentOutput!
           }),
-        (value) => agentReviewSchema.parse(value)
+        (value) => {
+          const parsedReview = agentReviewSchema.parse(value);
+          validateReviewSourceIds(parsedReview, knowledge);
+          return parsedReview;
+        }
       );
       reviews.push(review);
 
       transitionTo("deciding");
       const decision = decideRevision(review);
       steps[steps.length - 1].reviewDecision = decision;
+      reviewHistory.push({
+        reviewNumber: reviewCount,
+        stage: revisionCount === 0 ? "draft" : "revision",
+        review,
+        decision
+      });
 
       if (decision === "pass") {
         return await finalize("completed", "review_passed");
@@ -435,9 +564,10 @@ export async function runAgentWorkflow({
             knowledge: knowledge!,
             currentOutput: currentOutput!,
             findings: getRevisionRequiredFindings(review)
-          }),
+        }),
         (value) => generationOutputSchema.parse(value)
       );
+      revisedOutput = currentOutput;
     }
 
     throw new AgentWorkflowRuntimeError(

@@ -3,6 +3,9 @@ import { NextResponse } from "next/server";
 import { generateFromRequirementMemo } from "@/lib/generator";
 import { saveGeneration, updateGenerationMetadata } from "@/lib/storage";
 import { generateRequestSchema, type RagMetadata } from "@/lib/schema";
+import { runAgentWorkflow } from "@/lib/agent/orchestrator";
+import { createRealAgentWorkflowDependencies } from "@/lib/agent/runtime";
+import { createFileAgentRunStore } from "@/lib/agent/storage";
 import { getGroundedGenerationRagConfig } from "@/lib/rag/config";
 import { buildGroundedContext } from "@/lib/rag/context";
 import {
@@ -29,6 +32,31 @@ function toNonNegativeDurationMs(startMs: number, endMs = getTimerNow()): number
   return Math.max(0, Math.round(endMs - startMs));
 }
 
+function hasOwnField(body: unknown, fieldName: string): boolean {
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    Object.prototype.hasOwnProperty.call(body, fieldName)
+  );
+}
+
+function getAgentProviderMetadata(
+  steps: Array<{
+    providerBacked?: boolean;
+    provider?: string;
+    modelName?: string;
+    promptVersion?: string;
+  }>
+) {
+  const firstProviderStep = steps.find((step) => step.providerBacked === true);
+
+  return {
+    provider: firstProviderStep?.provider ?? "mock",
+    modelName: firstProviderStep?.modelName ?? "mock-local",
+    promptVersion: "agent-poc-workflow-v1"
+  };
+}
+
 export async function POST(request: Request) {
   const serverStartedAtMs = getTimerNow();
   let body: unknown;
@@ -52,6 +80,88 @@ export async function POST(request: Request) {
   }
 
   try {
+    if (
+      parsedRequest.data.agentMode === "on" &&
+      (hasOwnField(body, "ragMode") || hasOwnField(body, "ragContextPolicy"))
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "agentMode=on の場合は ragMode / ragContextPolicy を指定しないでください。Agent workflowは内部RAG policyを使用します。"
+        },
+        { status: 400 }
+      );
+    }
+
+    if (parsedRequest.data.agentMode === "on") {
+      const agentResult = await runAgentWorkflow({
+        requirementMemo: parsedRequest.data.inputText,
+        dependencies: createRealAgentWorkflowDependencies(),
+        runStore: createFileAgentRunStore()
+      });
+      const providerMetadata = getAgentProviderMetadata(
+        agentResult.metadata.steps
+      );
+      const serverProcessingMs = toNonNegativeDurationMs(serverStartedAtMs);
+      const agentResponse = {
+        id: agentResult.runId,
+        ...(agentResult.output ?? {}),
+        ...providerMetadata,
+        providerLatencyMs: undefined,
+        serverProcessingMs,
+        inputTokens: undefined,
+        outputTokens: undefined,
+        totalTokens: undefined,
+        rag: { mode: "off" },
+        createdAt: agentResult.createdAt,
+        agent: {
+          runId: agentResult.runId,
+          status: agentResult.metadata.status,
+          finalState: agentResult.metadata.finalState,
+          terminationReason: agentResult.metadata.terminationReason,
+          revisionCount: agentResult.metadata.revisionCount,
+          reviewCount: agentResult.metadata.reviewCount,
+          totalAgentLatencyMs: agentResult.metadata.totalAgentLatencyMs,
+          llmStepCount: agentResult.metadata.llmStepCount,
+          toolInvocationCount: agentResult.metadata.toolInvocationCount,
+          steps: agentResult.metadata.steps,
+          plan: agentResult.plan,
+          reviewHistory: agentResult.reviewHistory,
+          retrieval: agentResult.knowledge
+            ? {
+                retrievalMetadata: agentResult.knowledge.retrievalMetadata,
+                embeddingUsage: agentResult.knowledge.embeddingUsage,
+                sources: agentResult.knowledge.sources.map((source) => ({
+                  sourceId: source.sourceId,
+                  rank: source.rank,
+                  contextRank: source.contextRank,
+                  retrievalRank: source.retrievalRank,
+                  score: source.score,
+                  chunkId: source.chunkId,
+                  documentId: source.documentId,
+                  documentTitle: source.documentTitle,
+                  headingPath: source.headingPath,
+                  sourcePath: source.sourcePath
+                }))
+              }
+            : undefined,
+          error: agentResult.error
+        }
+      };
+
+      if (agentResult.metadata.status === "failed") {
+        return NextResponse.json(
+          {
+            error: agentResult.error?.message ?? "Agent workflow failed.",
+            agent: agentResponse.agent
+          },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json(agentResponse);
+    }
+
     let ragContextText: string | undefined;
     let ragMetadata: RagMetadata = { mode: "off" };
 

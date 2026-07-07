@@ -1,6 +1,7 @@
 import { loadRagCliEnv } from "@/lib/rag/cli";
 import { runAgentWorkflow } from "@/lib/agent/orchestrator";
 import { createRealAgentWorkflowDependencies } from "@/lib/agent/runtime";
+import { createFileAgentRunStore } from "@/lib/agent/storage";
 
 const smokeRequirementMemo = `ユーザーがプロフィール画像を変更できるようにしたい。
 画像は5MBまで、jpg/png対応。
@@ -17,7 +18,8 @@ async function main() {
 
   const result = await runAgentWorkflow({
     requirementMemo: smokeRequirementMemo,
-    dependencies: createRealAgentWorkflowDependencies()
+    dependencies: createRealAgentWorkflowDependencies(),
+    runStore: createFileAgentRunStore()
   });
   const retrievalMetadata =
     result.knowledge?.retrievalMetadata &&
@@ -32,6 +34,7 @@ async function main() {
     JSON.stringify(
       {
         agent: {
+          runId: result.runId,
           status: result.metadata.status,
           finalState: result.metadata.finalState,
           terminationReason: result.metadata.terminationReason,
@@ -77,6 +80,13 @@ async function main() {
               sources: safeSources
             }
           : undefined,
+        reviews: result.reviewHistory.map((entry) => ({
+          reviewNumber: entry.reviewNumber,
+          stage: entry.stage,
+          summary: entry.review.summary,
+          decision: entry.decision,
+          findings: entry.review.findings
+        })),
         output: result.output,
         error: result.error
       },

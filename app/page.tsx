@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type {
+  AgentMode,
   GenerationOutput,
   GenerationRecord,
   JiraTaskType,
@@ -10,6 +11,83 @@ import type {
   RagMode,
   RagSource
 } from "@/lib/schema";
+
+type AgentStepTrace = {
+  stepName: string;
+  status: "completed" | "failed";
+  latencyMs: number;
+  provider?: string;
+  modelName?: string;
+  promptVersion?: string;
+  providerBacked?: boolean;
+  providerLatencyMs?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  reviewDecision?: "pass" | "revise";
+};
+
+type AgentReviewFinding = {
+  findingId: string;
+  category: string;
+  severity: "blocker" | "major" | "minor";
+  targetFields: string[];
+  message: string;
+  requiredChange: string;
+  sourceIds: string[];
+};
+
+type AgentWorkflowMetadata = {
+  runId?: string;
+  status: "completed" | "completed_with_findings" | "failed";
+  finalState: string;
+  terminationReason: string;
+  revisionCount: number;
+  reviewCount: number;
+  totalAgentLatencyMs: number;
+  llmStepCount: number;
+  toolInvocationCount: number;
+  steps: AgentStepTrace[];
+  plan?: {
+    normalizedGoal: string;
+    explicitRequirements: string[];
+    constraints: string[];
+    ambiguities: string[];
+    knowledgeNeeds: string[];
+  };
+  reviewHistory: Array<{
+    reviewNumber: number;
+    stage: "draft" | "revision";
+    decision: "pass" | "revise";
+    review: {
+      summary: string;
+      findings: AgentReviewFinding[];
+    };
+  }>;
+  retrieval?: {
+    retrievalMetadata?: Record<string, unknown>;
+    embeddingUsage?: {
+      promptTokens?: number;
+      totalTokens?: number;
+    };
+    sources: Array<{
+      sourceId: string;
+      contextRank?: number;
+      retrievalRank?: number;
+      rank?: number;
+      score?: number;
+      chunkId?: string;
+      documentId?: string;
+      documentTitle?: string;
+      headingPath?: string[];
+      sourcePath?: string;
+    }>;
+  };
+  error?: {
+    message: string;
+    stepName?: string;
+  };
+};
 
 type GeneratedResponse = GenerationOutput & {
   id: string;
@@ -24,6 +102,7 @@ type GeneratedResponse = GenerationOutput & {
   totalTokens?: number;
   clientElapsedMs?: number;
   rag?: RagMetadata;
+  agent?: AgentWorkflowMetadata;
 };
 
 const sampleInput = `ユーザーがプロフィール画像を変更できるようにしたい。
@@ -62,6 +141,19 @@ function ListSection({ title, items }: { title: string; items: string[] }) {
         ))}
       </ul>
     </section>
+  );
+}
+
+function InlineList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="inline-list">
+      <strong>{title}</strong>
+      <ul>
+        {items.map((item, index) => (
+          <li key={`${title}-${index}`}>{item}</li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -139,6 +231,202 @@ function SourceList({ sources }: { sources: RagSource[] }) {
   );
 }
 
+function AgentSourceList({
+  sources
+}: {
+  sources: NonNullable<AgentWorkflowMetadata["retrieval"]>["sources"];
+}) {
+  return (
+    <section className="result-block source-block">
+      <h3>Retrieved Sources</h3>
+      <div className="source-list">
+        {sources.map((source) => (
+          <details key={source.sourceId} className="source-item">
+            <summary>
+              <span className="source-id">{source.sourceId}</span>
+              <span className="source-title">{source.documentTitle ?? source.documentId ?? "Source"}</span>
+              <span className="source-score">
+                score {typeof source.score === "number" ? formatScore(source.score) : "N/A"}
+              </span>
+            </summary>
+            <dl className="source-meta">
+              <div>
+                <dt>Context rank</dt>
+                <dd>{source.contextRank ?? source.rank ?? "N/A"}</dd>
+              </div>
+              <div>
+                <dt>Retrieval rank</dt>
+                <dd>{source.retrievalRank ?? source.rank ?? "N/A"}</dd>
+              </div>
+              <div>
+                <dt>Chunk</dt>
+                <dd>{source.chunkId ?? "N/A"}</dd>
+              </div>
+              <div>
+                <dt>Document</dt>
+                <dd>{source.documentId ?? "N/A"}</dd>
+              </div>
+              <div>
+                <dt>Section</dt>
+                <dd>{source.headingPath?.length ? source.headingPath.join(" > ") : "N/A"}</dd>
+              </div>
+              <div>
+                <dt>Source</dt>
+                <dd>{source.sourcePath ?? "N/A"}</dd>
+              </div>
+            </dl>
+          </details>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function stepLabel(stepName: string, sequence: number) {
+  if (stepName === "planning") return "Requirement Analysis";
+  if (stepName === "knowledge_retrieval") return "Knowledge Retrieval";
+  if (stepName === "draft_generation") return "Draft Generation";
+  if (stepName === "review") return sequence > 4 ? "Final Review" : "Review";
+  if (stepName === "revision") return "Revision";
+  if (stepName === "finalization") return "Finalization";
+  return stepName;
+}
+
+function AgentWorkflowPanel({ agent }: { agent: AgentWorkflowMetadata }) {
+  const warning = agent.status === "completed_with_findings";
+  const failed = agent.status === "failed";
+
+  return (
+    <section className={`result-block agent-panel ${warning ? "warning" : ""} ${failed ? "failed" : ""}`}>
+      <h3>Agent Workflow</h3>
+      {warning ? (
+        <p className="agent-warning">
+          Revision limit reached. The latest valid output is shown below, with unresolved review findings.
+        </p>
+      ) : null}
+      {failed ? (
+        <p className="agent-warning">Agent workflow failed. Single-pass fallback was not used.</p>
+      ) : null}
+      <dl className="meta-list agent-meta">
+        <div>
+          <dt>Status</dt>
+          <dd>{agent.status}</dd>
+        </div>
+        <div>
+          <dt>Termination</dt>
+          <dd>{agent.terminationReason}</dd>
+        </div>
+        <div>
+          <dt>Revision count</dt>
+          <dd>{agent.revisionCount}</dd>
+        </div>
+        <div>
+          <dt>Review count</dt>
+          <dd>{agent.reviewCount}</dd>
+        </div>
+        <div>
+          <dt>Agent latency</dt>
+          <dd>{formatDuration(agent.totalAgentLatencyMs)}</dd>
+        </div>
+        <div>
+          <dt>LLM steps</dt>
+          <dd>{agent.llmStepCount}</dd>
+        </div>
+        <div>
+          <dt>Tool calls</dt>
+          <dd>{agent.toolInvocationCount}</dd>
+        </div>
+        <div>
+          <dt>Run ID</dt>
+          <dd>{agent.runId ?? "N/A"}</dd>
+        </div>
+      </dl>
+
+      <div className="agent-section">
+        <h4>Step trace</h4>
+        <div className="agent-step-list">
+          {agent.steps.map((step, index) => (
+            <article key={`${step.stepName}-${index}`} className="agent-step">
+              <strong>{step.status === "completed" ? "✓" : "!"} {stepLabel(step.stepName, index + 1)}</strong>
+              <dl className="source-meta">
+                <div>
+                  <dt>Latency</dt>
+                  <dd>{formatDuration(step.latencyMs)}</dd>
+                </div>
+                <div>
+                  <dt>Prompt</dt>
+                  <dd>{step.promptVersion ?? "N/A"}</dd>
+                </div>
+                <div>
+                  <dt>Provider</dt>
+                  <dd>{step.provider ?? "N/A"}</dd>
+                </div>
+                <div>
+                  <dt>Model</dt>
+                  <dd>{step.modelName ?? "N/A"}</dd>
+                </div>
+                <div>
+                  <dt>Provider latency</dt>
+                  <dd>{formatDuration(step.providerLatencyMs)}</dd>
+                </div>
+                <div>
+                  <dt>Tokens</dt>
+                  <dd>
+                    {formatNumber(step.inputTokens)} / {formatNumber(step.outputTokens)} / {formatNumber(step.totalTokens)}
+                  </dd>
+                </div>
+                {step.reviewDecision ? (
+                  <div>
+                    <dt>Decision</dt>
+                    <dd>{step.reviewDecision}</dd>
+                  </div>
+                ) : null}
+              </dl>
+            </article>
+          ))}
+        </div>
+      </div>
+
+      {agent.plan ? (
+        <div className="agent-section">
+          <h4>Agent Plan</h4>
+          <p>{agent.plan.normalizedGoal}</p>
+          <InlineList title="Explicit requirements" items={agent.plan.explicitRequirements} />
+          <InlineList title="Constraints" items={agent.plan.constraints.length ? agent.plan.constraints : ["N/A"]} />
+          <InlineList title="Ambiguities" items={agent.plan.ambiguities.length ? agent.plan.ambiguities : ["N/A"]} />
+          <InlineList title="Knowledge needs" items={agent.plan.knowledgeNeeds.length ? agent.plan.knowledgeNeeds : ["N/A"]} />
+        </div>
+      ) : null}
+
+      <div className="agent-section">
+        <h4>Review history</h4>
+        {agent.reviewHistory.map((entry) => (
+          <article key={entry.reviewNumber} className="review-card">
+            <h5>Review #{entry.reviewNumber} / {entry.stage}</h5>
+            <p>{entry.review.summary}</p>
+            <p className="review-decision">Decision: {entry.decision}</p>
+            {entry.review.findings.length > 0 ? (
+              <div className="finding-list">
+                {entry.review.findings.map((finding) => (
+                  <article key={finding.findingId} className={`finding-item ${finding.severity}`}>
+                    <strong>{finding.severity} / {finding.category}</strong>
+                    <p>{finding.message}</p>
+                    <p>{finding.requiredChange}</p>
+                    <small>Fields: {finding.targetFields.join(", ")}</small>
+                    <small>Sources: {finding.sourceIds.length ? finding.sourceIds.join(", ") : "N/A"}</small>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="empty-text">No findings.</p>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function ResultView({
   output,
   meta
@@ -158,6 +446,7 @@ function ResultView({
     | "rag"
   > & {
     clientElapsedMs?: number;
+    agent?: AgentWorkflowMetadata;
   };
 }) {
   const rag = meta?.rag ?? { mode: "off" as const };
@@ -176,6 +465,10 @@ function ResultView({
         </div>
         {meta ? (
           <dl className="meta-list">
+            <div>
+              <dt>Mode</dt>
+              <dd>{meta.agent ? "Agent workflow" : "Single-pass"}</dd>
+            </div>
             <div>
               <dt>Provider</dt>
               <dd>{meta.provider}</dd>
@@ -218,7 +511,7 @@ function ResultView({
             </div>
             <div>
               <dt>RAG</dt>
-              <dd>{rag.mode === "on" ? "ON" : "OFF"}</dd>
+              <dd>{meta.agent ? "Agent internal" : rag.mode === "on" ? "ON" : "OFF"}</dd>
             </div>
             {rag.mode === "on" ? (
               <>
@@ -302,6 +595,12 @@ function ResultView({
         ) : null}
       </section>
 
+      {meta?.agent ? <AgentWorkflowPanel agent={meta.agent} /> : null}
+
+      {meta?.agent?.retrieval?.sources?.length ? (
+        <AgentSourceList sources={meta.agent.retrieval.sources} />
+      ) : null}
+
       {rag.mode === "on" ? <SourceList sources={rag.sources} /> : null}
 
       <ListSection title="仕様" items={output.spec} />
@@ -331,6 +630,7 @@ function ResultView({
 
 export default function Home() {
   const [inputText, setInputText] = useState(sampleInput);
+  const [agentMode, setAgentMode] = useState<AgentMode>("off");
   const [ragMode, setRagMode] = useState<RagMode>("off");
   const [ragContextPolicy, setRagContextPolicy] =
     useState<RagContextPolicy>("raw-top-k-v1");
@@ -391,7 +691,11 @@ export default function Home() {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ inputText, ragMode, ragContextPolicy })
+        body: JSON.stringify(
+          agentMode === "on"
+            ? { inputText, agentMode }
+            : { inputText, agentMode, ragMode, ragContextPolicy }
+        )
       });
       const data = await response.json();
 
@@ -439,6 +743,7 @@ export default function Home() {
           outputTokens: result.outputTokens,
           totalTokens: result.totalTokens,
           rag: result.rag,
+          agent: result.agent,
           clientElapsedMs: result.clientElapsedMs
         }
       : undefined;
@@ -478,7 +783,32 @@ export default function Home() {
               placeholder="実現したい機能や制約、失敗時の挙動を入力してください。"
               aria-label="要件メモ"
             />
-            <div className="rag-control" aria-label="RAG mode">
+            <div className="rag-control" aria-label="Generation mode">
+              <div>
+                <p className="control-label">Mode</p>
+                <p className="control-help">
+                  Agent workflowは内部RAG policyを使用します。
+                </p>
+              </div>
+              <div className="segmented-control">
+                <button
+                  className={agentMode === "off" ? "segment active" : "segment"}
+                  type="button"
+                  onClick={() => setAgentMode("off")}
+                >
+                  Single
+                </button>
+                <button
+                  className={agentMode === "on" ? "segment active" : "segment"}
+                  type="button"
+                  onClick={() => setAgentMode("on")}
+                >
+                  Agent
+                </button>
+              </div>
+            </div>
+            {agentMode === "off" ? (
+              <div className="rag-control" aria-label="RAG mode">
               <div>
                 <p className="control-label">RAG</p>
                 <p className="control-help">
@@ -502,7 +832,13 @@ export default function Home() {
                 </button>
               </div>
             </div>
-            {ragMode === "on" ? (
+            ) : null}
+            {agentMode === "on" ? (
+              <div className="agent-mode-note">
+                Agent workflow: heading-aware-v1 / document-diversity-v1 / candidate Top K 10
+              </div>
+            ) : null}
+            {agentMode === "off" && ragMode === "on" ? (
               <fieldset className="policy-control">
                 <legend>Context policy</legend>
                 <div className="policy-options">

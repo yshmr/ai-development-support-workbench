@@ -29,8 +29,24 @@ function getDataPath() {
   return path.join(process.cwd(), "data", "generations.json");
 }
 
+function getAgentRunsPath() {
+  return path.join(process.cwd(), "data", "agent-runs.json");
+}
+
 async function withPreservedGenerationData<T>(callback: () => Promise<T>) {
   const dataPath = getDataPath();
+  const hadDataFile = existsSync(dataPath);
+  const originalData = hadDataFile ? readFileSync(dataPath, "utf8") : "[]\n";
+
+  try {
+    return await callback();
+  } finally {
+    writeFileSync(dataPath, originalData, "utf8");
+  }
+}
+
+async function withPreservedAgentRunData<T>(callback: () => Promise<T>) {
+  const dataPath = getAgentRunsPath();
   const hadDataFile = existsSync(dataPath);
   const originalData = hadDataFile ? readFileSync(dataPath, "utf8") : "[]\n";
 
@@ -139,6 +155,9 @@ describe("generation schema", () => {
     expect(generateRequestSchema.parse({ inputText: sampleInput }).ragMode).toBe(
       "off"
     );
+    expect(
+      generateRequestSchema.parse({ inputText: sampleInput }).agentMode
+    ).toBe("off");
     expect(
       generateRequestSchema.parse({ inputText: sampleInput }).ragContextPolicy
     ).toBe("raw-top-k-v1");
@@ -814,6 +833,230 @@ describe("POST /api/generate", () => {
     });
   });
 
+  it("keeps existing generation behavior when agentMode is omitted or off", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mock");
+
+    await withPreservedGenerationData(async () => {
+      const omitted = await POST(
+        new Request("http://localhost/api/generate", {
+          method: "POST",
+          body: JSON.stringify({ inputText: sampleInput })
+        })
+      );
+      const off = await POST(
+        new Request("http://localhost/api/generate", {
+          method: "POST",
+          body: JSON.stringify({ inputText: sampleInput, agentMode: "off" })
+        })
+      );
+      const omittedBody = await omitted.json();
+      const offBody = await off.json();
+
+      expect(omitted.status).toBe(200);
+      expect(off.status).toBe(200);
+      expect(omittedBody.agent).toBeUndefined();
+      expect(offBody.agent).toBeUndefined();
+      expect(omittedBody.provider).toBe("mock");
+      expect(offBody.provider).toBe("mock");
+    });
+  });
+
+  it("runs Agent workflow when agentMode is on and does not save generation history", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mock");
+    const retrieveSpy = vi
+      .spyOn(ragRetriever, "retrieveRagChunks")
+      .mockResolvedValueOnce({
+        query: sampleInput,
+        strategy: "heading-aware-v1",
+        topK: 10,
+        embeddingModel: "text-embedding-3-small",
+        embeddingUsage: {
+          promptTokens: 20,
+          totalTokens: 20
+        },
+        results: [sampleRetrievedChunk()]
+      });
+
+    await withPreservedGenerationData(async () => {
+      await withPreservedAgentRunData(async () => {
+        const beforeGenerationData = existsSync(getDataPath())
+          ? readFileSync(getDataPath(), "utf8")
+          : "[]\n";
+        const response = await POST(
+          new Request("http://localhost/api/generate", {
+            method: "POST",
+            body: JSON.stringify({ inputText: sampleInput, agentMode: "on" })
+          })
+        );
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.agent).toMatchObject({
+          status: "completed",
+          terminationReason: "review_passed",
+          revisionCount: 0,
+          reviewCount: 1,
+          llmStepCount: 3,
+          toolInvocationCount: 1
+        });
+        expect(body.agent.plan).toBeDefined();
+        expect(body.agent.reviewHistory).toHaveLength(1);
+        expect(body.agent.retrieval.sources[0]).toMatchObject({
+          sourceId: "S1",
+          documentId: "profile-image-spec"
+        });
+        expect(body.agent.retrieval.sources[0].content).toBeUndefined();
+        expect(retrieveSpy).toHaveBeenCalledWith({
+          query: sampleInput,
+          strategy: "heading-aware-v1",
+          topK: 10
+        });
+        expect(
+          existsSync(getDataPath()) ? readFileSync(getDataPath(), "utf8") : "[]\n"
+        ).toBe(beforeGenerationData);
+        expect(readFileSync(getAgentRunsPath(), "utf8")).toContain(
+          body.agent.runId
+        );
+      });
+    });
+  });
+
+  it("rejects explicit RAG controls when agentMode is on", async () => {
+    const retrieveSpy = vi.spyOn(ragRetriever, "retrieveRagChunks");
+
+    const response = await POST(
+      new Request("http://localhost/api/generate", {
+        method: "POST",
+        body: JSON.stringify({
+          inputText: sampleInput,
+          agentMode: "on",
+          ragMode: "on"
+        })
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toContain("agentMode=on");
+    expect(retrieveSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns completed_with_findings as a successful Agent response", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openai");
+    vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
+    vi.stubEnv("OPENAI_MODEL", "gpt-5.4-mini");
+    vi.spyOn(ragRetriever, "retrieveRagChunks").mockResolvedValueOnce({
+      query: sampleInput,
+      strategy: "heading-aware-v1",
+      topK: 10,
+      embeddingModel: "text-embedding-3-small",
+      results: [sampleRetrievedChunk()]
+    });
+    const majorReview = {
+      summary: "重要な修正が必要です。",
+      findings: [
+        {
+          findingId: "major-1",
+          category: "requirement_coverage",
+          severity: "major",
+          targetFields: ["acceptanceCriteria"],
+          message: "失敗時メッセージが不足しています。",
+          requiredChange: "失敗時メッセージの受け入れ条件を追加する。",
+          sourceIds: ["S1"]
+        }
+      ]
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          output_text: JSON.stringify({
+            normalizedGoal: "プロフィール画像変更",
+            explicitRequirements: ["画像変更"],
+            constraints: [],
+            ambiguities: [],
+            knowledgeNeeds: ["profile"]
+          })
+        })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          output_text: JSON.stringify(createMockGeneration(sampleInput))
+        })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          output_text: JSON.stringify(majorReview)
+        })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          output_text: JSON.stringify(createMockGeneration(sampleInput))
+        })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          output_text: JSON.stringify(majorReview)
+        })
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await withPreservedAgentRunData(async () => {
+      const response = await POST(
+        new Request("http://localhost/api/generate", {
+          method: "POST",
+          body: JSON.stringify({ inputText: sampleInput, agentMode: "on" })
+        })
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.summary).toEqual(expect.any(String));
+      expect(body.agent).toMatchObject({
+        status: "completed_with_findings",
+        terminationReason: "revision_limit_reached",
+        revisionCount: 1,
+        reviewCount: 2,
+        llmStepCount: 5
+      });
+      expect(body.agent.reviewHistory[1].review.findings[0].severity).toBe(
+        "major"
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  it("returns technical Agent failure without single-pass fallback", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mock");
+    vi.spyOn(ragRetriever, "retrieveRagChunks").mockResolvedValueOnce({
+      query: sampleInput,
+      strategy: "heading-aware-v1",
+      topK: 10,
+      embeddingModel: "text-embedding-3-small",
+      results: []
+    });
+
+    await withPreservedAgentRunData(async () => {
+      const response = await POST(
+        new Request("http://localhost/api/generate", {
+          method: "POST",
+          body: JSON.stringify({ inputText: sampleInput, agentMode: "on" })
+        })
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(500);
+      expect(body.error).toContain("no usable chunks");
+      expect(body.agent.status).toBe("failed");
+      expect(body.summary).toBeUndefined();
+    });
+  });
+
   it("returns RAG source metadata when RAG mode is on", async () => {
     vi.stubEnv("LLM_PROVIDER", "mock");
     const retrieveSpy = vi
@@ -1198,6 +1441,18 @@ describe("generation UI", () => {
     expect(pageSource).toContain("rag.embeddingModel");
     expect(pageSource).toContain("rag.embeddingUsage?.promptTokens");
     expect(pageSource).toContain("sources.map");
+    expect(pageSource).toContain("agentMode");
+    expect(pageSource).toContain("Agent workflow");
+    expect(pageSource).toContain("Agent Workflow");
+    expect(pageSource).toContain("Review history");
+    expect(pageSource).toContain("completed_with_findings");
+    expect(pageSource).toContain("agentMode === \"on\"");
+    expect(pageSource).toContain("? { inputText, agentMode }");
+    expect(pageSource).toContain("AgentSourceList");
+    expect(pageSource).toContain("Single-pass fallback was not used");
+    expect(pageSource).toContain("revisionCount");
+    expect(pageSource).toContain("llmStepCount");
+    expect(pageSource).toContain("toolInvocationCount");
     expect(cssSource).toContain(
       "grid-template-columns: minmax(320px, 1fr) minmax(360px, 1.1fr);"
     );
@@ -1205,6 +1460,9 @@ describe("generation UI", () => {
     expect(cssSource).toContain(".summary-content");
     expect(cssSource).toContain(".policy-control");
     expect(cssSource).toContain(".policy-options");
+    expect(cssSource).toContain(".agent-panel");
+    expect(cssSource).toContain(".agent-step-list");
+    expect(cssSource).toContain(".finding-item.major");
     expect(cssSource).not.toContain("grid-template-columns: minmax(0, 1fr) auto;");
   });
 });

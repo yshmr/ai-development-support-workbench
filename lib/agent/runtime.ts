@@ -1,8 +1,8 @@
 import type { AgentWorkflowDependencies } from "./orchestrator";
 import {
-  createPassThroughStubReviewer,
   createRealAgentDraftGenerator,
-  createRealAgentPlanner
+  createRealAgentPlanner,
+  createRealAgentReviewer
 } from "./executors";
 import { createRagKnowledgeRetrievalTool } from "./knowledge";
 
@@ -11,6 +11,6 @@ export function createRealAgentWorkflowDependencies(): AgentWorkflowDependencies
     planner: createRealAgentPlanner(),
     knowledgeTool: createRagKnowledgeRetrievalTool(),
     generator: createRealAgentDraftGenerator(),
-    reviewer: createPassThroughStubReviewer()
+    reviewer: createRealAgentReviewer()
   };
 }

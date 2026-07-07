@@ -4,7 +4,12 @@ import {
   type AgentReviewer,
   createAgentExecutorResult
 } from "./orchestrator";
-import { generateAgentDraft, generateAgentPlan } from "./provider";
+import {
+  generateAgentDraft,
+  generateAgentPlan,
+  generateAgentReview,
+  generateAgentRevision
+} from "./provider";
 import type { AgentReview } from "./schema";
 
 export function createRealAgentPlanner(): AgentPlanner {
@@ -26,8 +31,30 @@ export function createRealAgentDraftGenerator(): AgentGenerator {
       });
       return createAgentExecutorResult(result.data, result.metadata);
     },
-    revise({ currentOutput }) {
-      return currentOutput;
+    async revise({ requirementMemo, plan, knowledge, currentOutput, findings }) {
+      const result = await generateAgentRevision({
+        requirementMemo,
+        plan,
+        groundedContext: knowledge.groundedContext,
+        currentOutput,
+        findings
+      });
+      return createAgentExecutorResult(result.data, result.metadata);
+    }
+  };
+}
+
+export function createRealAgentReviewer(): AgentReviewer {
+  return {
+    async review({ requirementMemo, plan, knowledge, output }) {
+      const result = await generateAgentReview({
+        requirementMemo,
+        plan,
+        groundedContext: knowledge.groundedContext,
+        sources: knowledge.sources,
+        output
+      });
+      return createAgentExecutorResult(result.data, result.metadata);
     }
   };
 }

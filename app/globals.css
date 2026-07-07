@@ -366,6 +366,10 @@ textarea:focus {
   grid-column: 1 / -1;
 }
 
+.agent-panel {
+  grid-column: 1 / -1;
+}
+
 .summary-panel,
 .result-block {
   padding: 18px;
@@ -509,6 +513,117 @@ textarea:focus {
   background: var(--surface);
   line-height: 1.7;
   white-space: pre-wrap;
+}
+
+.agent-mode-note {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  color: var(--muted);
+  background: #fbfcfd;
+  line-height: 1.5;
+}
+
+.agent-panel.warning {
+  border-color: var(--accent);
+  background: #fffaf0;
+}
+
+.agent-panel.failed {
+  border-color: var(--danger);
+  background: #fff7f7;
+}
+
+.agent-warning {
+  margin: 0 0 12px;
+  color: var(--accent);
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.agent-panel.failed .agent-warning {
+  color: var(--danger);
+}
+
+.agent-meta {
+  margin-bottom: 16px;
+}
+
+.agent-section {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  min-width: 0;
+}
+
+.agent-section h4,
+.review-card h5 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.agent-section p,
+.review-card p {
+  margin: 0;
+  line-height: 1.65;
+}
+
+.inline-list {
+  display: grid;
+  gap: 6px;
+}
+
+.inline-list ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  line-height: 1.6;
+}
+
+.agent-step-list,
+.finding-list {
+  display: grid;
+  gap: 10px;
+}
+
+.agent-step,
+.review-card,
+.finding-item {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.agent-step strong,
+.finding-item strong,
+.review-decision {
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.finding-item {
+  display: grid;
+  gap: 6px;
+}
+
+.finding-item.blocker {
+  border-color: var(--danger);
+}
+
+.finding-item.major {
+  border-color: var(--accent);
+}
+
+.finding-item.minor {
+  border-color: var(--line);
+}
+
+.finding-item small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .task-list {

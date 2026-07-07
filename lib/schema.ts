@@ -15,6 +15,7 @@ export const jiraTaskSchema = z.object({
 
 export const llmProviderSchema = z.enum(["mock", "openai", "gemini", "anthropic"]);
 export const ragModeSchema = z.enum(["off", "on"]);
+export const agentModeSchema = z.enum(["off", "on"]);
 export const ragContextPolicySchema = z.enum([
   "raw-top-k-v1",
   "document-cap-v1",
@@ -99,6 +100,7 @@ export const generationRecordSchema = z.object({
 
 export const generateRequestSchema = z.object({
   inputText: z.string().trim().min(1, "要件メモを入力してください。"),
+  agentMode: agentModeSchema.default("off"),
   ragMode: ragModeSchema.default("off"),
   ragContextPolicy: ragContextPolicySchema.default("raw-top-k-v1")
 });
@@ -109,6 +111,7 @@ export type JiraTaskType = z.infer<typeof jiraTaskTypeSchema>;
 export type JiraTask = z.infer<typeof jiraTaskSchema>;
 export type LlmProvider = z.infer<typeof llmProviderSchema>;
 export type RagMode = z.infer<typeof ragModeSchema>;
+export type AgentMode = z.infer<typeof agentModeSchema>;
 export type RagContextPolicy = z.infer<typeof ragContextPolicySchema>;
 export type RagSource = z.infer<typeof ragSourceSchema>;
 export type RagMetadata = z.infer<typeof ragMetadataSchema>;

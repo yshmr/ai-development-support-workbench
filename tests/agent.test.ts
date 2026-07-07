@@ -14,8 +14,12 @@ import {
 import {
   agentDraftPromptVersion,
   agentPlannerPromptVersion,
+  agentReviewerPromptVersion,
+  agentRevisionPromptVersion,
   generateAgentDraft,
-  generateAgentPlan
+  generateAgentPlan,
+  generateAgentReview,
+  generateAgentRevision
 } from "@/lib/agent/provider";
 import {
   canTransitionAgentState,
@@ -26,6 +30,7 @@ import type {
   AgentPlan,
   AgentReview,
   AgentReviewFinding,
+  AgentRunRecord,
   GenerationOutput,
   KnowledgeRetrievalToolResult
 } from "@/lib/agent/schema";
@@ -157,6 +162,80 @@ function createDependencies(input: {
     generator,
     reviewer
   };
+}
+
+type ProviderUsage = {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+};
+
+function executorResult<T>(
+  data: T,
+  promptVersion: string,
+  usage: ProviderUsage = {
+    inputTokens: 1,
+    outputTokens: 2,
+    totalTokens: 3
+  }
+) {
+  return {
+    __agentExecutorResult: true as const,
+    data,
+    metadata: {
+      provider: "openai",
+      modelName: "gpt-5.4-mini",
+      promptVersion,
+      providerBacked: true,
+      providerLatencyMs: 1,
+      ...usage
+    }
+  };
+}
+
+function createProviderBackedDependencies(input: {
+  reviews: AgentReview[];
+  revision?: GenerationOutput;
+  revisionSpy?: ReturnType<typeof vi.fn>;
+  reviewerUsage?: ProviderUsage;
+  revisionUsage?: ProviderUsage;
+}) {
+  let reviewIndex = 0;
+  const revisionOutput = input.revision ?? sampleOutput({ summary: "修正版です。" });
+  const revisionSpy = input.revisionSpy ?? vi.fn();
+
+  return {
+    planner: {
+      plan: vi.fn(() => executorResult(samplePlan, agentPlannerPromptVersion))
+    },
+    knowledgeTool: {
+      toolName: "knowledge.retrieve" as const,
+      invoke: vi.fn(() => sampleKnowledge)
+    },
+    generator: {
+      draft: vi.fn(() => executorResult(sampleOutput(), agentDraftPromptVersion)),
+      revise: vi.fn((revisionInput) => {
+        revisionSpy(revisionInput);
+        return executorResult(
+          revisionOutput,
+          agentRevisionPromptVersion,
+          input.revisionUsage
+        );
+      })
+    },
+    reviewer: {
+      review: vi.fn(() => {
+        const selectedReview =
+          input.reviews[Math.min(reviewIndex, input.reviews.length - 1)];
+        reviewIndex += 1;
+        return executorResult(
+          selectedReview,
+          agentReviewerPromptVersion,
+          input.reviewerUsage
+        );
+      })
+    }
+  } satisfies AgentWorkflowDependencies;
 }
 
 describe("Agent state transitions", () => {
@@ -495,6 +574,268 @@ describe("Agent workflow orchestrator", () => {
   });
 });
 
+describe("Agent Phase 1-D review, revision, and persistence semantics", () => {
+  it("counts provider-backed Planner, Draft, and Reviewer on first review pass", async () => {
+    const dependencies = createProviderBackedDependencies({
+      reviews: [review()]
+    });
+
+    const result = await runAgentWorkflow({ requirementMemo, dependencies });
+
+    expect(result.metadata.status).toBe("completed");
+    expect(result.metadata.revisionCount).toBe(0);
+    expect(result.metadata.reviewCount).toBe(1);
+    expect(result.metadata.llmStepCount).toBe(3);
+    expect(result.metadata.steps.map((step) => step.stepName)).toEqual([
+      "planning",
+      "knowledge_retrieval",
+      "draft_generation",
+      "review",
+      "finalization"
+    ]);
+    expect(result.metadata.steps[3]).toMatchObject({
+      providerBacked: true,
+      promptVersion: agentReviewerPromptVersion,
+      reviewDecision: "pass"
+    });
+    expect(result.reviewHistory).toHaveLength(1);
+    expect(result.reviewHistory[0]).toMatchObject({
+      reviewNumber: 1,
+      stage: "draft",
+      decision: "pass"
+    });
+  });
+
+  it("runs a targeted revision once for major findings and reuses knowledge", async () => {
+    const revisionSpy = vi.fn();
+    const dependencies = createProviderBackedDependencies({
+      reviews: [review([finding("major")]), review()],
+      revisionSpy
+    });
+
+    const result = await runAgentWorkflow({ requirementMemo, dependencies });
+
+    expect(result.metadata.status).toBe("completed");
+    expect(result.metadata.revisionCount).toBe(1);
+    expect(result.metadata.reviewCount).toBe(2);
+    expect(result.metadata.llmStepCount).toBe(5);
+    expect(result.metadata.toolInvocationCount).toBe(1);
+    expect(dependencies.knowledgeTool.invoke).toHaveBeenCalledTimes(1);
+    expect(dependencies.generator.revise).toHaveBeenCalledTimes(1);
+    expect(result.metadata.steps.map((step) => step.stepName)).toEqual([
+      "planning",
+      "knowledge_retrieval",
+      "draft_generation",
+      "review",
+      "revision",
+      "review",
+      "finalization"
+    ]);
+    expect(result.metadata.steps[4]).toMatchObject({
+      providerBacked: true,
+      promptVersion: agentRevisionPromptVersion
+    });
+    expect(result.reviewHistory.map((entry) => entry.stage)).toEqual([
+      "draft",
+      "revision"
+    ]);
+    expect(revisionSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        knowledge: sampleKnowledge,
+        findings: [expect.objectContaining({ severity: "major" })]
+      })
+    );
+  });
+
+  it("filters revision input to blocker and major findings only", async () => {
+    const revisionSpy = vi.fn();
+    const dependencies = createProviderBackedDependencies({
+      reviews: [
+        review([
+          finding("minor", { findingId: "minor-1" }),
+          finding("major", { findingId: "major-1" }),
+          finding("blocker", { findingId: "blocker-1" })
+        ]),
+        review()
+      ],
+      revisionSpy
+    });
+
+    await runAgentWorkflow({ requirementMemo, dependencies });
+
+    expect(revisionSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        findings: [
+          expect.objectContaining({ findingId: "major-1" }),
+          expect.objectContaining({ findingId: "blocker-1" })
+        ]
+      })
+    );
+    expect(
+      revisionSpy.mock.calls[0][0].findings.some(
+        (item: AgentReviewFinding) => item.severity === "minor"
+      )
+    ).toBe(false);
+  });
+
+  it("returns completed_with_findings when the second real review still requires revision", async () => {
+    const dependencies = createProviderBackedDependencies({
+      reviews: [review([finding("blocker")]), review([finding("major")])]
+    });
+
+    const result = await runAgentWorkflow({ requirementMemo, dependencies });
+
+    expect(result.metadata.status).toBe("completed_with_findings");
+    expect(result.metadata.finalState).toBe("completed_with_findings");
+    expect(result.metadata.terminationReason).toBe("revision_limit_reached");
+    expect(result.metadata.revisionCount).toBe(1);
+    expect(result.metadata.reviewCount).toBe(2);
+    expect(result.metadata.llmStepCount).toBe(5);
+    expect(result.reviewHistory[1].review.findings).toEqual([
+      expect.objectContaining({ severity: "major" })
+    ]);
+    expect(dependencies.generator.revise).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts provider-backed Reviewer and Revision even when usage is unavailable", async () => {
+    const dependencies = createProviderBackedDependencies({
+      reviews: [review([finding("major")]), review()],
+      reviewerUsage: {},
+      revisionUsage: {}
+    });
+
+    const result = await runAgentWorkflow({ requirementMemo, dependencies });
+
+    expect(result.metadata.llmStepCount).toBe(5);
+    expect(result.metadata.steps[3].providerBacked).toBe(true);
+    expect(result.metadata.steps[4].providerBacked).toBe(true);
+    expect(result.metadata.steps[3].inputTokens).toBeUndefined();
+    expect(result.metadata.steps[4].inputTokens).toBeUndefined();
+  });
+
+  it("validates Reviewer sourceIds against selected source IDs", async () => {
+    const validDependencies = createProviderBackedDependencies({
+      reviews: [
+        review([
+          finding("minor", {
+            sourceIds: ["S1"]
+          }),
+          finding("minor", {
+            findingId: "cross-field",
+            category: "cross_field_consistency",
+            sourceIds: []
+          })
+        ])
+      ]
+    });
+
+    const validResult = await runAgentWorkflow({
+      requirementMemo,
+      dependencies: validDependencies
+    });
+
+    expect(validResult.metadata.status).toBe("completed");
+
+    const invalidDependencies = createProviderBackedDependencies({
+      reviews: [review([finding("major", { sourceIds: ["S99"] })])]
+    });
+
+    const invalidResult = await runAgentWorkflow({
+      requirementMemo,
+      dependencies: invalidDependencies
+    });
+
+    expect(invalidResult.metadata.status).toBe("failed");
+    expect(invalidResult.error?.stepName).toBe("review");
+    expect(invalidResult.error?.message).toContain("unknown sourceId");
+    expect(invalidDependencies.generator.revise).not.toHaveBeenCalled();
+  });
+
+  it("persists completed and completed_with_findings Agent runs without unsafe payloads", async () => {
+    const records: AgentRunRecord[] = [];
+    const runStore = {
+      saveRun: vi.fn(async (record: AgentRunRecord) => {
+        records.push(record);
+        return record;
+      })
+    };
+
+    const completed = await runAgentWorkflow({
+      requirementMemo,
+      dependencies: createProviderBackedDependencies({ reviews: [review()] }),
+      runStore
+    });
+    const completedWithFindings = await runAgentWorkflow({
+      requirementMemo,
+      dependencies: createProviderBackedDependencies({
+        reviews: [review([finding("major")]), review([finding("major")])]
+      }),
+      runStore
+    });
+
+    expect(completed.metadata.status).toBe("completed");
+    expect(completedWithFindings.metadata.status).toBe("completed_with_findings");
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({
+      inputText: requirementMemo,
+      metadata: expect.objectContaining({ status: "completed" }),
+      finalOutput: sampleOutput()
+    });
+    expect(records[1]).toMatchObject({
+      metadata: expect.objectContaining({ status: "completed_with_findings" }),
+      reviewHistory: expect.arrayContaining([
+        expect.objectContaining({ decision: "revise" })
+      ])
+    });
+    const serialized = JSON.stringify(records);
+    expect(serialized).not.toContain(sampleKnowledge.groundedContext);
+    expect(serialized).not.toContain("content");
+    expect(serialized).not.toContain("chainOfThought");
+    expect(serialized).not.toContain("test-openai-key");
+  });
+
+  it("persists failure records and fails before successful terminal transition on persistence failure", async () => {
+    const failureRecords: AgentRunRecord[] = [];
+    const failureResult = await runAgentWorkflow({
+      requirementMemo,
+      dependencies: createDependencies({
+        draft: {
+          summary: "invalid"
+        }
+      }).dependencies,
+      runStore: {
+        saveRun: vi.fn(async (record: AgentRunRecord) => {
+          failureRecords.push(record);
+          return record;
+        })
+      }
+    });
+
+    expect(failureResult.metadata.status).toBe("failed");
+    expect(failureRecords).toHaveLength(1);
+    expect(failureRecords[0].error?.stepName).toBe("draft_generation");
+
+    const persistenceFailureResult = await runAgentWorkflow({
+      requirementMemo,
+      dependencies: createProviderBackedDependencies({ reviews: [review()] }),
+      runStore: {
+        saveRun: vi.fn(async () => {
+          throw new Error("agent persistence unavailable");
+        })
+      }
+    });
+
+    expect(persistenceFailureResult.metadata.status).toBe("failed");
+    expect(persistenceFailureResult.metadata.finalState).toBe("failed");
+    expect(persistenceFailureResult.metadata.terminationReason).toBe(
+      "technical_failure"
+    );
+    expect(persistenceFailureResult.error?.message).toContain(
+      "agent persistence unavailable"
+    );
+  });
+});
+
 describe("Agent Phase 1-C real integration adapters", () => {
   function openAiResponse(data: unknown, usage = {
     input_tokens: 11,
@@ -783,6 +1124,75 @@ describe("Agent Phase 1-C real integration adapters", () => {
     expect(userContent).toContain(sampleKnowledge.groundedContext);
     expect(userContent).not.toContain("test-openai-key");
     expect(result.metadata.promptVersion).toBe(agentDraftPromptVersion);
+  });
+
+  it("validates real Reviewer structured output and preserves reviewer prompt metadata", async () => {
+    setupOpenAiEnv();
+    const fetchMock = vi.fn(async () =>
+      openAiResponse(review([finding("minor", { sourceIds: [] })]), {
+        input_tokens: 31,
+        output_tokens: 17,
+        total_tokens: 48
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await generateAgentReview({
+      requirementMemo,
+      plan: samplePlan,
+      groundedContext: sampleKnowledge.groundedContext,
+      sources: sampleKnowledge.sources,
+      output: sampleOutput()
+    });
+    const requestBody = JSON.parse(
+      String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)
+    );
+    const systemContent = requestBody.input[0].content as string;
+    const userContent = requestBody.input[1].content as string;
+
+    expect(result.data.findings[0].severity).toBe("minor");
+    expect(result.metadata).toMatchObject({
+      provider: "openai",
+      modelName: "gpt-5.4-mini",
+      promptVersion: agentReviewerPromptVersion,
+      providerBacked: true,
+      inputTokens: 31,
+      outputTokens: 17,
+      totalTokens: 48
+    });
+    expect(systemContent).toContain("workflow decisionは返さないでください");
+    expect(systemContent).toContain("minorはrevision必須ではない局所的改善");
+    expect(userContent).toContain("Selected source IDs");
+    expect(userContent).toContain("S1");
+    expect(userContent).not.toContain("test-openai-key");
+  });
+
+  it("validates real revision structured output and sends only required findings", async () => {
+    setupOpenAiEnv();
+    const revised = sampleOutput({ summary: "review findingに基づく修正版です。" });
+    const fetchMock = vi.fn(async () => openAiResponse(revised));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await generateAgentRevision({
+      requirementMemo,
+      plan: samplePlan,
+      groundedContext: sampleKnowledge.groundedContext,
+      currentOutput: sampleOutput(),
+      findings: [finding("major")]
+    });
+    const requestBody = JSON.parse(
+      String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)
+    );
+    const systemContent = requestBody.input[0].content as string;
+    const userContent = requestBody.input[1].content as string;
+
+    expect(result.data).toEqual(revised);
+    expect(result.metadata.promptVersion).toBe(agentRevisionPromptVersion);
+    expect(systemContent).toContain("targetedに修正してください");
+    expect(systemContent).toContain("review findingにない新しいmandatory product ruleを追加しないでください");
+    expect(userContent).toContain("Required blocker / major review findings JSON");
+    expect(userContent).toContain("major-finding");
+    expect(userContent).not.toContain("test-openai-key");
   });
 
   it("fails closed when Draft Generator output is invalid", async () => {
