@@ -19,7 +19,9 @@
     "rag:evaluate": "tsx scripts/rag-evaluate.ts",
     "rag:evaluate:fixed": "tsx scripts/rag-evaluate.ts fixed-size-v1",
     "rag:evaluate:heading": "tsx scripts/rag-evaluate.ts heading-aware-v1",
-    "agent:smoke": "tsx scripts/agent-smoke.ts"
+    "agent:smoke": "tsx scripts/agent-smoke.ts",
+    "agent:evaluate:run": "tsx scripts/agent-evaluate-run.ts",
+    "agent:evaluate:summarize": "tsx scripts/agent-evaluate-summarize.ts"
   },
   "dependencies": {
     "@next/env": "^15.5.20",

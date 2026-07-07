@@ -255,7 +255,7 @@ The paired comparison helps determine whether revision improves output or introd
 
 ## 11. Evaluation Dataset Schema
 
-Phase 1-A does not create actual JSON dataset unless a later implementation phase needs it. The schema is designed here for later use.
+Phase 1-Eでは、この設計に基づく公開safe datasetと評価harnessを追加した。詳細な実行手順、blind bundle、manual score schema、集計方式は [Phase 1-E evaluation foundation](phase_1_e_agent_workflow_evaluation.md) を参照する。
 
 ```ts
 type AgentEvaluationCase = {

@@ -1,0 +1,185 @@
+[
+  {
+    "caseId": "AGENT-001",
+    "title": "Profile image basic multi-document requirement",
+    "requirementMemo": "ユーザーがプロフィール画像を変更できるようにしたい。\n画像は5MBまで、jpg/png対応。\n変更後は即時反映したい。\n失敗時にはエラーメッセージを表示したい。",
+    "expectedRelevantDocumentIds": [
+      "profile-image-spec",
+      "error-message-guideline",
+      "profile-api",
+      "storage-lifecycle",
+      "frontend-cache-guideline"
+    ],
+    "importantExpectedRules": [
+      "5MB以下のJPG/PNG画像をアップロードできる",
+      "5MB超過、未対応形式、画像実体検証失敗を保存せず扱う",
+      "POST /api/profile/image はログイン中ユーザーのプロフィール画像を更新する",
+      "成功時はlatest profile image URLまたはversioned URLを画面状態へ反映する",
+      "ユーザー向けエラーメッセージは原因別で行動可能にする"
+    ],
+    "unsupportedAssumptionsToAvoid": [
+      "WebP対応を必須仕様にする",
+      "リアルタイムで別端末へ即時同期すると断定する",
+      "malware scanを必須実装として断定する"
+    ],
+    "crossFieldConsistencyChecks": [
+      "API endpointがPOST /api/profile/imageで一貫している",
+      "サイズ上限が全fieldで5MBとして一貫している",
+      "対応形式がJPG/PNGとして一貫している",
+      "即時反映とlatest URL / versioned URL方針が矛盾しない"
+    ],
+    "notes": [
+      "multi-document retrieval and output traceability anchor case",
+      "AGENT-001 is repeated three times per mode for limited repeatability analysis"
+    ]
+  },
+  {
+    "caseId": "AGENT-002",
+    "title": "Profile image validation and invalid upload behavior",
+    "requirementMemo": "プロフィール画像アップロードで、不正な画像を保存しないようにしたい。\n5MB超過、JPG/PNG以外、画像として読み込めないファイルをそれぞれ分かるエラーにしたい。\n内部例外やstorage情報は画面に出したくない。",
+    "expectedRelevantDocumentIds": [
+      "profile-image-spec",
+      "profile-api",
+      "error-message-guideline",
+      "media-upload-security"
+    ],
+    "importantExpectedRules": [
+      "5MB超過はfile_too_largeとして扱う",
+      "JPG/PNG以外はunsupported_formatとして扱う",
+      "画像実体検証失敗はinvalid_image_contentとして扱う",
+      "MIME typeと実際の画像内容をサーバー側で検証する",
+      "内部例外詳細、storage bucket名、認証headerはuser-facing messageへ出さない"
+    ],
+    "unsupportedAssumptionsToAvoid": [
+      "クライアント側チェックだけで安全性を保証すると断定する",
+      "virus scanを必須仕様として断定する",
+      "すべてのvalidation errorが再試行すれば成功すると断定する"
+    ],
+    "crossFieldConsistencyChecks": [
+      "error codeとユーザー向けメッセージの対応がfield間で矛盾しない",
+      "画像実体検証をJPG/PNG形式チェックと混同しない",
+      "内部詳細非表示がspec、reviewPoints、risksで矛盾しない"
+    ],
+    "notes": [
+      "validation and unsupported-assumption control case"
+    ]
+  },
+  {
+    "caseId": "AGENT-003",
+    "title": "Profile image replacement lifecycle and cleanup concern",
+    "requirementMemo": "プロフィール画像を差し替えるとき、新しい画像の保存に成功してから参照先を切り替えたい。\n切替や保存に失敗した場合は旧画像を維持し、不完全な一時ファイルを残さないようにしたい。\n旧画像の削除方針も確認事項として整理したい。",
+    "expectedRelevantDocumentIds": [
+      "storage-lifecycle",
+      "profile-api",
+      "error-message-guideline",
+      "profile-image-spec"
+    ],
+    "importantExpectedRules": [
+      "新画像オブジェクト保存成功後にプロフィール参照先を切り替える",
+      "参照更新失敗時は新しく保存した一時オブジェクトをcleanup対象にする",
+      "validationや保存失敗時は不完全なtemporary objectを残さない",
+      "旧画像の即時削除または一定期間後削除はpolicy選択事項として扱う",
+      "ユーザー向けには内部詳細を表示しない"
+    ],
+    "unsupportedAssumptionsToAvoid": [
+      "旧画像を必ず即時削除すると断定する",
+      "rollbackが常に自動成功すると断定する",
+      "特定のobject storage vendorを前提にする"
+    ],
+    "crossFieldConsistencyChecks": [
+      "保存成功前に参照先だけ更新しない方針が一貫している",
+      "失敗時の旧画像維持とcleanup方針が矛盾しない",
+      "旧画像削除policyを未確定事項として扱えている"
+    ],
+    "notes": [
+      "lifecycle and cleanup traceability case"
+    ]
+  },
+  {
+    "caseId": "AGENT-004",
+    "title": "Disable email notification requirement",
+    "requirementMemo": "ユーザーがメール通知を無効化できるようにしたい。\n無効化した場合はプロダクト更新、週次サマリー、キャンペーン通知メールを送らないでほしい。\nただしセキュリティ通知やパスワード変更通知は止めないようにしたい。\n保存後は画面に完了メッセージを表示したい。",
+    "expectedRelevantDocumentIds": [
+      "notification-settings-spec"
+    ],
+    "importantExpectedRules": [
+      "メール通知を無効化できる",
+      "プロダクト更新、週次サマリー、キャンペーン通知は停止対象",
+      "セキュリティ通知、パスワード変更通知、利用規約の重要変更は送信対象",
+      "設定変更後は保存完了メッセージを表示する",
+      "配信停止は次回ジョブ実行から反映され、queued mailは停止できない場合がある"
+    ],
+    "unsupportedAssumptionsToAvoid": [
+      "すべてのメールを停止すると断定する",
+      "過去にqueuedされたメールも必ず停止できると断定する",
+      "push通知やSMS通知の仕様を必須追加する"
+    ],
+    "crossFieldConsistencyChecks": [
+      "停止対象メールと必須通知の例外がfield間で矛盾しない",
+      "反映タイミングが即時停止と次回ジョブ実行で矛盾しない",
+      "保存完了メッセージが受け入れ条件やUI作業に反映されている"
+    ],
+    "notes": [
+      "non-profile distractor domain case"
+    ]
+  },
+  {
+    "caseId": "AGENT-005",
+    "title": "Search status filter requirement",
+    "requirementMemo": "検索結果をステータスで絞り込めるようにしたい。\nopen、in_progress、resolved、archivedを選べるようにし、複数ステータス選択にも対応したい。\n選択状態はURL queryに反映し、結果が0件の場合は空状態を表示したい。",
+    "expectedRelevantDocumentIds": [
+      "search-filter-spec"
+    ],
+    "importantExpectedRules": [
+      "open、in_progress、resolved、archivedで絞り込める",
+      "複数ステータスを同時に選択できる",
+      "URL query parameter statusへcomma separated valueとして保持する",
+      "初期並び順は関連度順",
+      "結果件数が0件の場合は空状態を表示する"
+    ],
+    "unsupportedAssumptionsToAvoid": [
+      "ステータスを単一選択に限定する",
+      "URL queryへ保存しない設計にする",
+      "未定義ステータスを必須追加する",
+      "更新日時順を初期並び順と断定する"
+    ],
+    "crossFieldConsistencyChecks": [
+      "対応ステータス名がfield間で一貫している",
+      "複数選択とURL query表現が矛盾しない",
+      "0件時の空状態がacceptanceCriteriaやJira taskに反映されている"
+    ],
+    "notes": [
+      "search filter domain and URL state traceability case"
+    ]
+  },
+  {
+    "caseId": "AGENT-006",
+    "title": "Ambiguous profile image delivery requirement",
+    "requirementMemo": "プロフィール画像の表示をもっと安定させたい。\nユーザーが画像を変更した直後に古い画像が見えないようにしたいが、CDNや複数端末への反映範囲はまだ決まっていない。\n決まっていない部分は確認事項として残したい。",
+    "expectedRelevantDocumentIds": [
+      "frontend-cache-guideline",
+      "profile-api",
+      "profile-image-spec"
+    ],
+    "importantExpectedRules": [
+      "更新APIが返すlatest image URLをクライアントのユーザー状態へ即時反映する",
+      "ページ全体のreloadを前提にしない",
+      "profileImageVersionをquery parameterへ付与するかversioned URLを返す選択肢がある",
+      "更新直後のUIではlatest image URLまたはversioned URLを優先する",
+      "複数端末へのリアルタイム同期は保証しない"
+    ],
+    "unsupportedAssumptionsToAvoid": [
+      "CDNキャッシュ仕様が確定していると断定する",
+      "複数端末へリアルタイム同期すると断定する",
+      "ETagだけで更新直後の表示問題が必ず解決すると断定する"
+    ],
+    "crossFieldConsistencyChecks": [
+      "未確定のCDN/複数端末事項をrisksや確認事項へ維持している",
+      "latest URLまたはversioned URL方針がfield間で矛盾しない",
+      "古い画像を見せない目的とリアルタイム同期非保証が矛盾しない"
+    ],
+    "notes": [
+      "ambiguous requirement case for unsupported mandatory rule control"
+    ]
+  }
+]
