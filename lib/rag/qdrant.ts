@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { QdrantClient } from "@qdrant/js-client-rest";
+import { QdrantClient, type QdrantClientParams } from "@qdrant/js-client-rest";
 import { getRagConfig } from "./config";
 import {
   qdrantPayloadSchema,
@@ -30,12 +30,18 @@ export function getRagCollectionName(strategy: RagChunkStrategy): string {
   return collectionByStrategy[strategy];
 }
 
-export function createRagQdrantClient(): QdrantClient {
+export function createRagQdrantClientParams(): QdrantClientParams {
   const config = getRagConfig();
-  return new QdrantClient({
+
+  return {
     url: config.qdrantUrl,
-    apiKey: config.qdrantApiKey
-  });
+    apiKey: config.qdrantApiKey,
+    checkCompatibility: false
+  };
+}
+
+export function createRagQdrantClient(): QdrantClient {
+  return new QdrantClient(createRagQdrantClientParams());
 }
 
 export function chunkIdToPointId(chunkId: string): string {

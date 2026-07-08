@@ -19,6 +19,7 @@ import {
 import { loadRagDocuments } from "@/lib/rag/loader";
 import {
   chunkIdToPointId,
+  createRagQdrantClientParams,
   getRagCollectionName,
   normalizeQdrantResults,
   upsertRagChunks
@@ -302,6 +303,17 @@ describe("OpenAI embedding client", () => {
 });
 
 describe("Qdrant adapter", () => {
+  it("skips Qdrant server compatibility version checks for local PoC runs", () => {
+    vi.stubEnv("QDRANT_URL", "http://localhost:6333");
+    vi.stubEnv("QDRANT_API_KEY", "test-qdrant-key");
+
+    expect(createRagQdrantClientParams()).toMatchObject({
+      url: "http://localhost:6333",
+      apiKey: "test-qdrant-key",
+      checkCompatibility: false
+    });
+  });
+
   it("maps strategies to stable collection names", () => {
     expect(getRagCollectionName("fixed-size-v1")).toBe("rag_chunks_fixed_v1");
     expect(getRagCollectionName("heading-aware-v1")).toBe(
