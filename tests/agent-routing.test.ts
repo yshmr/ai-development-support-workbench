@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createAgentContractChecklist } from "@/lib/agent/contract-checklist";
+import {
+  auditAgentContractChecklistCoverage,
+  createAgentContractChecklist
+} from "@/lib/agent/contract-checklist";
+import type { GenerationOutput } from "@/lib/schema";
 import {
   analyzeAgentRoutingSignals,
   agentRoutingContractCandidatePolicyVersion,
@@ -224,6 +228,61 @@ describe("Agent Phase 2-C contract-detail routing calibration", () => {
 });
 
 describe("Agent Phase 2-C contract-detail checklist foundation", () => {
+  function coveredContractOutput(): GenerationOutput {
+    return {
+      summary: "検索結果のステータスフィルター",
+      spec: [
+        "URL query parameterのstatusにopen,in_progress,resolved,archivedをcomma separated valueで保持する。",
+        "未指定時は関連度順で、URL再読み込み後も条件を復元する。"
+      ],
+      acceptanceCriteria: [
+        "複数ステータス選択時にstatus queryが更新される。",
+        "0件の場合は空状態を表示する。",
+        "sort未指定時は関連度順で表示する。"
+      ],
+      jiraTasks: [
+        {
+          title: "status query filterを実装する",
+          description:
+            "open,in_progress,resolved,archivedの複数選択、comma separated value、URL復元を扱う。",
+          type: "frontend"
+        },
+        {
+          title: "filter contract testsを追加する",
+          description:
+            "default sort、empty state、query serializationを検証する。",
+          type: "test"
+        }
+      ],
+      implementationPlan: [
+        "URL queryのparse/serialize helperを追加する。",
+        "reload後にstatus filterを復元する。"
+      ],
+      reviewPoints: [
+        "enum values、query parameter、empty state、default sortが仕様と一致するか確認する。"
+      ],
+      risks: ["未定義status値は既存API仕様と合わせる必要がある。"]
+    };
+  }
+
+  function weakContractOutput(): GenerationOutput {
+    return {
+      summary: "検索結果フィルター",
+      spec: ["検索結果を絞り込めるようにする。"],
+      acceptanceCriteria: ["条件を選ぶと結果が更新される。"],
+      jiraTasks: [
+        {
+          title: "filterを実装する",
+          description: "検索条件で結果を更新する。",
+          type: "frontend"
+        }
+      ],
+      implementationPlan: ["検索画面の状態を更新する。"],
+      reviewPoints: ["結果が更新されることを確認する。"],
+      risks: ["仕様の追加確認が必要。"]
+    };
+  }
+
   it("creates deterministic checklist items for low-risk query contract cases", () => {
     const requirementMemo =
       "検索結果をopen、in_progress、resolved、archivedで絞り込みたい。複数ステータスを選べて、URL query parameterのstatusへcomma separated valueとして保持したい。初期並び順は関連度順で、0件のときは空状態を表示したい。";
@@ -254,6 +313,38 @@ describe("Agent Phase 2-C contract-detail checklist foundation", () => {
     expect(JSON.stringify(checklist)).not.toContain("open、in_progress");
   });
 
+  it("audits checklist coverage without storing the raw requirement memo", () => {
+    const requirementMemo =
+      "検索結果をopen、in_progress、resolved、archivedで絞り込みたい。複数ステータスを選べて、URL query parameterのstatusへcomma separated valueとして保持したい。初期並び順は関連度順で、0件のときは空状態を表示したい。";
+    const checklist = createAgentContractChecklist({ requirementMemo });
+    const audit = auditAgentContractChecklistCoverage({
+      checklist,
+      output: coveredContractOutput()
+    });
+
+    expect(audit.recommended).toBe(true);
+    expect(audit.coveredCount).toBe(5);
+    expect(audit.needsReviewCount).toBe(0);
+    expect(audit.items.every((item) => item.status === "covered")).toBe(true);
+    expect(JSON.stringify(audit)).not.toContain("open、in_progress");
+  });
+
+  it("marks weak outputs for manual review instead of auto-scoring quality", () => {
+    const requirementMemo =
+      "検索結果をopen、in_progress、resolved、archivedで絞り込みたい。複数ステータスを選べて、URL query parameterのstatusへcomma separated valueとして保持したい。初期並び順は関連度順で、0件のときは空状態を表示したい。";
+    const checklist = createAgentContractChecklist({ requirementMemo });
+    const audit = auditAgentContractChecklistCoverage({
+      checklist,
+      output: weakContractOutput()
+    });
+
+    expect(audit.coveredCount).toBeLessThan(audit.items.length);
+    expect(audit.needsReviewCount).toBeGreaterThan(0);
+    expect(
+      audit.items.some((item) => item.status === "needs_review")
+    ).toBe(true);
+  });
+
   it("does not create checklist items for copy-only low-risk cases", () => {
     const requirementMemo = "設定画面の保存ボタンの文言を「保存する」に変更したい。";
     const checklist = createAgentContractChecklist({ requirementMemo });
@@ -262,6 +353,19 @@ describe("Agent Phase 2-C contract-detail checklist foundation", () => {
       policyVersion: "contract-detail-checklist-v1",
       recommended: false,
       reason: "Contract-detail signal is below the lightweight checklist threshold.",
+      items: []
+    });
+    expect(
+      auditAgentContractChecklistCoverage({
+        checklist,
+        output: coveredContractOutput()
+      })
+    ).toEqual({
+      policyVersion: "contract-detail-checklist-audit-v1",
+      checklistPolicyVersion: "contract-detail-checklist-v1",
+      recommended: false,
+      coveredCount: 0,
+      needsReviewCount: 0,
       items: []
     });
   });

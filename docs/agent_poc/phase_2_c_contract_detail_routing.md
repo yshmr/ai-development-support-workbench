@@ -181,6 +181,30 @@ instructions such as:
 This foundation is intentionally not wired into `/api/generate`. It exists so
 the checklist can be inspected and tested before any provider-backed experiment.
 
+## Local Checklist Audit
+
+Phase 2-C includes a local audit helper:
+
+```text
+contract-detail-checklist-audit-v1
+```
+
+The audit checks whether each checklist category appears in the target
+`GenerationOutput` fields. It returns:
+
+- `covered`
+- `needs_review`
+
+This audit is intentionally conservative:
+
+- it does not assign quality scores
+- it does not replace blind evaluation
+- it does not persist the raw requirement memo
+- it only marks likely missing checklist coverage for manual review
+
+The audit is useful before a provider-backed experiment because it makes the
+expected checklist behavior testable with synthetic outputs.
+
 The next possible step would be a separate lightweight checklist experiment:
 
 - keep single-pass generation
