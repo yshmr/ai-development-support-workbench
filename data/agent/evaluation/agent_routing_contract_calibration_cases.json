@@ -1,0 +1,66 @@
+[
+  {
+    "caseId": "ROUTE-CONTRACT-001",
+    "title": "Status filter query representation",
+    "requirementMemo": "検索結果をopen、in_progress、resolved、archivedで絞り込みたい。複数ステータスを選べて、URL query parameterのstatusへcomma separated valueとして保持したい。初期並び順は関連度順で、0件のときは空状態を表示したい。",
+    "expectedRoute": "single_pass",
+    "expectedLightweightChecklist": true,
+    "rationale": "Low operational risk, but detail-dense query representation, enum, default sort, and empty-state contract should trigger lightweight checklist instead of full Agent workflow."
+  },
+  {
+    "caseId": "ROUTE-CONTRACT-002",
+    "title": "Existing sort query parameter option",
+    "requirementMemo": "検索結果を作成日順でも並び替えたい。既存のsort query parameterにcreated_at_descを追加し、未指定時の初期並び順は関連度順のままにしたい。",
+    "expectedRoute": "single_pass",
+    "expectedLightweightChecklist": true,
+    "rationale": "Clear additive query contract with default behavior detail; checklist is useful, full Agent workflow is not justified."
+  },
+  {
+    "caseId": "ROUTE-CONTRACT-003",
+    "title": "Tab selection URL persistence",
+    "requirementMemo": "設定画面の選択中タブをURL queryのtabに保持し、ページ再読み込み後も同じタブを復元したい。未指定時はprofileタブを初期表示にしたい。",
+    "expectedRoute": "single_pass",
+    "expectedLightweightChecklist": true,
+    "rationale": "Low-risk UI state persistence with query and default state details should receive checklist attention."
+  },
+  {
+    "caseId": "ROUTE-CONTRACT-004",
+    "title": "Simple copy-only change",
+    "requirementMemo": "設定画面の保存ボタンの文言を「保存する」に変更したい。",
+    "expectedRoute": "single_pass",
+    "expectedLightweightChecklist": false,
+    "rationale": "Copy-only low-risk change with no contract-detail checklist need."
+  },
+  {
+    "caseId": "ROUTE-CONTRACT-005",
+    "title": "Static empty state copy",
+    "requirementMemo": "検索結果が0件のときに「該当する結果はありません」と表示したい。",
+    "expectedRoute": "single_pass",
+    "expectedLightweightChecklist": false,
+    "rationale": "Small single-condition UI behavior; not detail-dense enough for the contract checklist gate."
+  },
+  {
+    "caseId": "ROUTE-CONTRACT-006",
+    "title": "Profile image lifecycle rollback",
+    "requirementMemo": "プロフィール画像を差し替えるとき、新しい画像の保存に成功してから参照先を切り替えたい。切替や保存に失敗した場合は旧画像を維持し、不完全な一時ファイルを残さないようにしたい。旧画像の削除方針も確認事項として整理したい。",
+    "expectedRoute": "agent_workflow",
+    "expectedLightweightChecklist": false,
+    "rationale": "Lifecycle, rollback, cleanup, and unresolved policy concerns should still trigger Agent workflow rather than checklist-only handling."
+  },
+  {
+    "caseId": "ROUTE-CONTRACT-007",
+    "title": "Notification exception policy",
+    "requirementMemo": "ユーザーがメール通知を無効化できるようにしたい。ただしセキュリティ通知やパスワード変更通知は止めないようにしたい。停止対象と必須通知の例外が矛盾しないように整理したい。",
+    "expectedRoute": "agent_workflow",
+    "expectedLightweightChecklist": false,
+    "rationale": "Exception policy and cross-field consistency concerns should remain Agent workflow candidates."
+  },
+  {
+    "caseId": "ROUTE-CONTRACT-008",
+    "title": "Upload validation and internal detail masking",
+    "requirementMemo": "プロフィール画像アップロードで、不正な画像を保存しないようにしたい。5MB超過、JPG/PNG以外、画像として読み込めないファイルをそれぞれ分かるエラーにしたい。内部例外やstorage情報は画面に出したくない。",
+    "expectedRoute": "agent_workflow",
+    "expectedLightweightChecklist": false,
+    "rationale": "Validation and internal detail masking remain safety-sensitive enough for Agent workflow."
+  }
+]

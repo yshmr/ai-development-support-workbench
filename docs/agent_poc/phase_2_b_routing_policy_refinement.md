@@ -561,3 +561,6 @@ It should add:
 Only after a local calibration gate demonstrates that the new signals catch
 contract-detail misses without collapsing back into Always Agent Workflow should
 another real formal evaluation be considered.
+
+The Phase 2-C routing-only spike is documented in
+[Phase 2-C contract-detail routing](phase_2_c_contract_detail_routing.md).

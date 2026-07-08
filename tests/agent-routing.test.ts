@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   analyzeAgentRoutingSignals,
+  agentRoutingContractCandidatePolicyVersion,
   agentRoutingDecisionSchema,
   agentRoutingCandidatePolicyVersion,
   agentRoutingPolicyVersion,
   createAgentRoutingCandidateDecision,
+  createAgentRoutingContractCandidateDecision,
   createAgentRoutingDecision
 } from "@/lib/agent/routing";
 import {
+  loadAgentRoutingContractCalibrationCases,
   loadAgentRoutingCalibrationCases,
+  runAgentRoutingContractDryRunCalibration,
   runAgentRoutingDryRunCalibration
 } from "@/lib/agent/routing-calibration";
 import {
@@ -151,6 +155,69 @@ describe("Agent Phase 2-B routing dry-run calibration", () => {
     ).toBeGreaterThanOrEqual(2);
     expect(calibration.summary.lowRiskAvoidanceRate).toBe(1);
     expect(calibration.summary.highRiskRouteRate).toBe(1);
+    expect(calibration.summary.gatePassed).toBe(true);
+  });
+});
+
+describe("Agent Phase 2-C contract-detail routing calibration", () => {
+  it("keeps low-risk detail-dense requirements on single-pass with checklist signal", () => {
+    const decision = createAgentRoutingContractCandidateDecision({
+      requirementMemo:
+        "検索結果をopen、in_progress、resolved、archivedで絞り込みたい。複数ステータスを選べて、URL query parameterのstatusへcomma separated valueとして保持したい。初期並び順は関連度順で、0件のときは空状態を表示したい。"
+    });
+
+    expect(decision.policyVersion).toBe(
+      agentRoutingContractCandidatePolicyVersion
+    );
+    expect(decision.mode).toBe("single_pass");
+    expect(decision.signals.candidateScore).toBeLessThan(4);
+    expect(decision.signals.contractDetailScore).toBeGreaterThanOrEqual(3);
+    expect(decision.signals.lightweightChecklistRecommended).toBe(true);
+    expect(decision.reasons).toContain(
+      "single-pass route should use contract-detail checklist before finalization"
+    );
+    expect(JSON.stringify(decision)).not.toContain("open、in_progress");
+  });
+
+  it("does not recommend checklist for copy-only single-pass requirements", () => {
+    const decision = createAgentRoutingContractCandidateDecision({
+      requirementMemo: "設定画面の保存ボタンの文言を「保存する」に変更したい。"
+    });
+
+    expect(decision.mode).toBe("single_pass");
+    expect(decision.signals.contractDetailScore).toBe(0);
+    expect(decision.signals.lightweightChecklistRecommended).toBe(false);
+  });
+
+  it("keeps lifecycle and validation cases on Agent workflow without checklist-only handling", () => {
+    const lifecycleDecision = createAgentRoutingContractCandidateDecision({
+      requirementMemo:
+        "プロフィール画像を差し替えるとき、保存に成功してから参照先を切り替えたい。失敗時は旧画像を維持し、不完全な一時ファイルを残さないようにしたい。旧画像の削除方針も確認事項として整理したい。"
+    });
+    const validationDecision = createAgentRoutingContractCandidateDecision({
+      requirementMemo:
+        "プロフィール画像アップロードで、不正な画像を保存しないようにしたい。5MB超過、JPG/PNG以外、画像として読み込めないファイルをそれぞれ分かるエラーにしたい。内部例外やstorage情報は画面に出したくない。"
+    });
+
+    expect(lifecycleDecision.mode).toBe("agent_workflow");
+    expect(lifecycleDecision.signals.lightweightChecklistRecommended).toBe(false);
+    expect(validationDecision.mode).toBe("agent_workflow");
+    expect(validationDecision.signals.lightweightChecklistRecommended).toBe(false);
+  });
+
+  it("passes the contract-detail routing-only calibration gate", async () => {
+    const cases = await loadAgentRoutingContractCalibrationCases();
+    const calibration = runAgentRoutingContractDryRunCalibration(cases);
+
+    expect(calibration.summary.policyVersion).toBe(
+      agentRoutingContractCandidatePolicyVersion
+    );
+    expect(calibration.summary.totalCases).toBe(8);
+    expect(calibration.summary.passRate).toBe(1);
+    expect(calibration.summary.lowRiskAvoidanceRate).toBe(1);
+    expect(calibration.summary.highRiskRouteRate).toBe(1);
+    expect(calibration.summary.checklistExpectationPassRate).toBe(1);
+    expect(calibration.summary.checklistRecommendedRate).toBe(0.375);
     expect(calibration.summary.gatePassed).toBe(true);
   });
 });

@@ -2,10 +2,13 @@ import { z } from "zod";
 
 export const agentRoutingPolicyVersion = "agent-routing-v1";
 export const agentRoutingCandidatePolicyVersion = "agent-routing-v2-candidate";
+export const agentRoutingContractCandidatePolicyVersion =
+  "agent-routing-v3-contract-candidate";
 
 export const agentRoutingPolicyVersionSchema = z.enum([
   agentRoutingPolicyVersion,
-  agentRoutingCandidatePolicyVersion
+  agentRoutingCandidatePolicyVersion,
+  agentRoutingContractCandidatePolicyVersion
 ]);
 
 export const agentRoutingModeSchema = z.enum([
@@ -24,6 +27,12 @@ export const agentRoutingSignalsSchema = z.object({
   unresolvedScopeMarkerCount: z.number().int().nonnegative().optional(),
   notificationExceptionMarkerCount: z.number().int().nonnegative().optional(),
   validationSecurityMarkerCount: z.number().int().nonnegative().optional(),
+  queryParameterMarkerCount: z.number().int().nonnegative().optional(),
+  enumValueMarkerCount: z.number().int().nonnegative().optional(),
+  defaultStateMarkerCount: z.number().int().nonnegative().optional(),
+  persistenceMarkerCount: z.number().int().nonnegative().optional(),
+  contractDetailScore: z.number().int().nonnegative().optional(),
+  lightweightChecklistRecommended: z.boolean().optional(),
   candidateScore: z.number().int().nonnegative().optional()
 });
 
@@ -139,6 +148,52 @@ const validationSecurityMarkers = [
   "読み込めない",
   "保存しない",
   "セキュリティ"
+];
+
+const queryParameterMarkers = [
+  "query parameter",
+  "クエリパラメータ",
+  "クエリ",
+  "URL query",
+  "URL",
+  "status",
+  "sort",
+  "page",
+  "filter"
+];
+
+const enumValueMarkers = [
+  "open",
+  "in_progress",
+  "resolved",
+  "archived",
+  "created_at_desc",
+  "relevance",
+  "関連度",
+  "カンマ",
+  "comma",
+  "複数ステータス"
+];
+
+const defaultStateMarkers = [
+  "初期",
+  "デフォルト",
+  "default",
+  "0件",
+  "空状態",
+  "empty state",
+  "並び順",
+  "復元"
+];
+
+const persistenceMarkers = [
+  "保持",
+  "復元",
+  "共有",
+  "URL共有",
+  "反映",
+  "bookmark",
+  "ブックマーク"
 ];
 
 function countKeywordHits(input: string, keywords: string[]): number {
@@ -374,6 +429,63 @@ export function createAgentRoutingCandidateDecision(
               : "candidate score stayed below Agent workflow threshold"
           ]
         : ["candidate score stayed below Agent workflow threshold"],
+    signals
+  });
+}
+
+export function createAgentRoutingContractCandidateDecision(
+  input: CreateAgentRoutingDecisionInput
+): AgentRoutingDecision {
+  const candidateDecision = createAgentRoutingCandidateDecision(input);
+  const queryParameterMarkerCount = countKeywordHits(
+    input.requirementMemo,
+    queryParameterMarkers
+  );
+  const enumValueMarkerCount = countKeywordHits(
+    input.requirementMemo,
+    enumValueMarkers
+  );
+  const defaultStateMarkerCount = countKeywordHits(
+    input.requirementMemo,
+    defaultStateMarkers
+  );
+  const persistenceMarkerCount = countKeywordHits(
+    input.requirementMemo,
+    persistenceMarkers
+  );
+  const contractDetailScore =
+    queryParameterMarkerCount +
+    enumValueMarkerCount +
+    defaultStateMarkerCount +
+    persistenceMarkerCount;
+  const lightweightChecklistRecommended =
+    candidateDecision.mode === "single_pass" && contractDetailScore >= 3;
+  const reasons = [...candidateDecision.reasons];
+
+  if (contractDetailScore > 0) {
+    reasons.push("contract-detail markers detected for lightweight checklist");
+  }
+
+  if (lightweightChecklistRecommended) {
+    reasons.push(
+      "single-pass route should use contract-detail checklist before finalization"
+    );
+  }
+
+  const signals = agentRoutingSignalsSchema.parse({
+    ...candidateDecision.signals,
+    queryParameterMarkerCount,
+    enumValueMarkerCount,
+    defaultStateMarkerCount,
+    persistenceMarkerCount,
+    contractDetailScore,
+    lightweightChecklistRecommended
+  });
+
+  return agentRoutingDecisionSchema.parse({
+    ...candidateDecision,
+    policyVersion: agentRoutingContractCandidatePolicyVersion,
+    reasons,
     signals
   });
 }

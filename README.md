@@ -334,12 +334,19 @@ Phase 2-Bでは、ChatGPTを必須dependencyにしないためのcontext-isolate
 
 追加分析では、Routed v2の主な失敗領域は「高リスク・曖昧さ」ではなく、URL query表現、enum filter、default sort、empty stateのようなlow-risk but detail-denseな契約詳細の取りこぼしだと整理しました。次の候補は、full Agent workflowへ寄せる前に、contract-detail detectorや軽量checklist pathをrouting-onlyで検証することです。
 
+Phase 2-Cでは、この仮説をlocal routing-only spikeとして実装しました。`agent-routing-v3-contract-candidate`は、low-risk detail-dense requestを`single_pass`のまま維持しつつ、`lightweightChecklistRecommended`を立てます。calibrationは外部API、Embeddings、Qdrantを呼びません。
+
+```bash
+npm run agent:routing:contract:calibrate
+```
+
 詳細:
 
 - [AI Agent Phase 2-A adaptive routing design](docs/agent_poc/phase_2_a_adaptive_agent_routing.md)
 - [AI Agent Phase 2-A adaptive routing evaluation results](docs/agent_poc/phase_2_a_adaptive_agent_routing_evaluation_results.md)
 - [AI Agent Phase 2-B routing policy refinement](docs/agent_poc/phase_2_b_routing_policy_refinement.md)
 - [AI Agent Phase 2-B routing failure analysis](docs/agent_poc/phase_2_b_routing_failure_analysis.md)
+- [AI Agent Phase 2-C contract-detail routing spike](docs/agent_poc/phase_2_c_contract_detail_routing.md)
 - [Context-isolated blind evaluation workflow](docs/agent_poc/context_isolated_blind_evaluation_workflow.md)
 
 ## Tech Stack
@@ -385,6 +392,7 @@ Local runtime artifacts such as `data/generations.json`, `data/agent-runs.json`,
 - [AI Agent Phase 1-E evaluation results](docs/agent_poc/phase_1_e_agent_workflow_evaluation_results.md)
 - [AI Agent Phase 2-B routing policy refinement](docs/agent_poc/phase_2_b_routing_policy_refinement.md)
 - [AI Agent Phase 2-B routing failure analysis](docs/agent_poc/phase_2_b_routing_failure_analysis.md)
+- [AI Agent Phase 2-C contract-detail routing spike](docs/agent_poc/phase_2_c_contract_detail_routing.md)
 - [Context-isolated blind evaluation workflow](docs/agent_poc/context_isolated_blind_evaluation_workflow.md)
 
 ## Setup / Run

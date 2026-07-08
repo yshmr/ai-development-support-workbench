@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   agentRoutingModeSchema,
   createAgentRoutingCandidateDecision,
+  createAgentRoutingContractCandidateDecision,
   createAgentRoutingDecision,
   type AgentRoutingDecision,
   type AgentRoutingMode
@@ -16,12 +17,20 @@ export const agentRoutingCalibrationCasesPath = path.join(
   "evaluation",
   "agent_routing_calibration_cases.json"
 );
+export const agentRoutingContractCalibrationCasesPath = path.join(
+  process.cwd(),
+  "data",
+  "agent",
+  "evaluation",
+  "agent_routing_contract_calibration_cases.json"
+);
 
 export const agentRoutingCalibrationCaseSchema = z.object({
-  caseId: z.string().regex(/^ROUTE-CAL-\d{3}$/),
+  caseId: z.string().regex(/^ROUTE-(?:CAL|CONTRACT)-\d{3}$/),
   title: z.string().min(1),
   requirementMemo: z.string().min(1),
   expectedRoute: agentRoutingModeSchema,
+  expectedLightweightChecklist: z.boolean().optional(),
   rationale: z.string().min(1)
 });
 
@@ -39,6 +48,8 @@ export type AgentRoutingCalibrationResult = {
   expectedRoute: AgentRoutingMode;
   actualRoute: AgentRoutingMode;
   passed: boolean;
+  expectedLightweightChecklist?: boolean;
+  actualLightweightChecklist?: boolean;
   baselineV1Route: AgentRoutingMode;
   candidateDecision: AgentRoutingDecision;
   baselineV1Decision: AgentRoutingDecision;
@@ -56,6 +67,8 @@ export type AgentRoutingDryRunCalibrationSummary = {
   agentWorkflowRate: number;
   lowRiskAvoidanceRate: number;
   highRiskRouteRate: number;
+  checklistExpectationPassRate?: number;
+  checklistRecommendedRate?: number;
   gatePassed: boolean;
 };
 
@@ -108,24 +121,41 @@ export async function loadAgentRoutingCalibrationCases(
   return validateAgentRoutingCalibrationCases(JSON.parse(raw));
 }
 
-export function runAgentRoutingDryRunCalibration(
-  cases: AgentRoutingCalibrationCase[]
+export async function loadAgentRoutingContractCalibrationCases(
+  filePath = agentRoutingContractCalibrationCasesPath
+): Promise<AgentRoutingCalibrationCase[]> {
+  const raw = await readFile(filePath, "utf8");
+  return validateAgentRoutingCalibrationCases(JSON.parse(raw));
+}
+
+function runAgentRoutingDryRunCalibrationWithDecision(
+  cases: AgentRoutingCalibrationCase[],
+  createCandidateDecision: (input: { requirementMemo: string }) => AgentRoutingDecision
 ): AgentRoutingDryRunCalibration {
   const validatedCases = validateAgentRoutingCalibrationCases(cases);
   const results = validatedCases.map((testCase) => {
     const baselineV1Decision = createAgentRoutingDecision({
       requirementMemo: testCase.requirementMemo
     });
-    const candidateDecision = createAgentRoutingCandidateDecision({
+    const candidateDecision = createCandidateDecision({
       requirementMemo: testCase.requirementMemo
     });
+    const actualLightweightChecklist =
+      candidateDecision.signals.lightweightChecklistRecommended;
+    const routePassed = candidateDecision.mode === testCase.expectedRoute;
+    const checklistPassed =
+      testCase.expectedLightweightChecklist === undefined
+        ? true
+        : actualLightweightChecklist === testCase.expectedLightweightChecklist;
 
     return {
       caseId: testCase.caseId,
       title: testCase.title,
       expectedRoute: testCase.expectedRoute,
       actualRoute: candidateDecision.mode,
-      passed: candidateDecision.mode === testCase.expectedRoute,
+      passed: routePassed && checklistPassed,
+      expectedLightweightChecklist: testCase.expectedLightweightChecklist,
+      actualLightweightChecklist,
       baselineV1Route: baselineV1Decision.mode,
       candidateDecision,
       baselineV1Decision
@@ -139,6 +169,20 @@ export function runAgentRoutingDryRunCalibration(
     results.map((result) => result.baselineV1Route)
   );
   const passCount = results.filter((result) => result.passed).length;
+  const checklistExpectationCases = results.filter(
+    (result) => result.expectedLightweightChecklist !== undefined
+  );
+  const checklistExpectationPassRate =
+    checklistExpectationCases.length > 0
+      ? ratio(
+          checklistExpectationCases.filter(
+            (result) =>
+              result.actualLightweightChecklist ===
+              result.expectedLightweightChecklist
+          ).length,
+          checklistExpectationCases.length
+        )
+      : undefined;
   const lowRiskCases = results.filter(
     (result) => result.expectedRoute === "single_pass"
   );
@@ -157,6 +201,17 @@ export function runAgentRoutingDryRunCalibration(
   const totalCases = results.length;
   const singlePassRate = ratio(actualModeCounts.single_pass, totalCases);
   const agentWorkflowRate = ratio(actualModeCounts.agent_workflow, totalCases);
+  const checklistRecommendedRate =
+    checklistExpectationCases.length > 0
+      ? ratio(
+          results.filter((result) => result.actualLightweightChecklist === true)
+            .length,
+          totalCases
+        )
+      : undefined;
+  const checklistGatePassed =
+    checklistExpectationPassRate === undefined ||
+    checklistExpectationPassRate === 1;
 
   return {
     summary: {
@@ -173,14 +228,35 @@ export function runAgentRoutingDryRunCalibration(
       agentWorkflowRate,
       lowRiskAvoidanceRate,
       highRiskRouteRate,
+      checklistExpectationPassRate,
+      checklistRecommendedRate,
       gatePassed:
         singlePassRate >= 0.25 &&
         agentWorkflowRate >= 0.25 &&
         lowRiskAvoidanceRate === 1 &&
-        highRiskRouteRate === 1
+        highRiskRouteRate === 1 &&
+        checklistGatePassed
     },
     results
   };
+}
+
+export function runAgentRoutingDryRunCalibration(
+  cases: AgentRoutingCalibrationCase[]
+): AgentRoutingDryRunCalibration {
+  return runAgentRoutingDryRunCalibrationWithDecision(
+    cases,
+    createAgentRoutingCandidateDecision
+  );
+}
+
+export function runAgentRoutingContractDryRunCalibration(
+  cases: AgentRoutingCalibrationCase[]
+): AgentRoutingDryRunCalibration {
+  return runAgentRoutingDryRunCalibrationWithDecision(
+    cases,
+    createAgentRoutingContractCandidateDecision
+  );
 }
 
 export function formatAgentRoutingDryRunCalibration(
@@ -188,6 +264,10 @@ export function formatAgentRoutingDryRunCalibration(
 ): string {
   const rows = calibration.results.map((result) => {
     const score = result.candidateDecision.signals.candidateScore ?? 0;
+    const checklist =
+      result.actualLightweightChecklist === undefined
+        ? "N/A"
+        : String(result.actualLightweightChecklist);
 
     return [
       result.caseId,
@@ -195,12 +275,13 @@ export function formatAgentRoutingDryRunCalibration(
       result.actualRoute,
       result.baselineV1Route,
       String(score),
+      checklist,
       result.passed ? "pass" : "fail"
     ].join(" | ");
   });
 
   return [
-    "Agent Phase 2-B routing dry-run calibration",
+    "Agent routing dry-run calibration",
     "",
     `policyVersion: ${calibration.summary.policyVersion}`,
     `totalCases: ${calibration.summary.totalCases}`,
@@ -209,10 +290,18 @@ export function formatAgentRoutingDryRunCalibration(
     `agentWorkflowRate: ${calibration.summary.agentWorkflowRate.toFixed(3)}`,
     `lowRiskAvoidanceRate: ${calibration.summary.lowRiskAvoidanceRate.toFixed(3)}`,
     `highRiskRouteRate: ${calibration.summary.highRiskRouteRate.toFixed(3)}`,
+    calibration.summary.checklistExpectationPassRate === undefined
+      ? undefined
+      : `checklistExpectationPassRate: ${calibration.summary.checklistExpectationPassRate.toFixed(3)}`,
+    calibration.summary.checklistRecommendedRate === undefined
+      ? undefined
+      : `checklistRecommendedRate: ${calibration.summary.checklistRecommendedRate.toFixed(3)}`,
     `gatePassed: ${calibration.summary.gatePassed}`,
     "",
-    "caseId | expected | actual | baselineV1 | candidateScore | result",
-    "---|---|---|---|---:|---",
+    "caseId | expected | actual | baselineV1 | candidateScore | checklist | result",
+    "---|---|---|---|---:|---|---",
     ...rows
-  ].join("\n");
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n");
 }
