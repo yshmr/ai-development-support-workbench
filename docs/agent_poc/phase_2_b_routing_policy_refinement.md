@@ -1,11 +1,12 @@
-# AI Agent PoC Phase 2-B Routing Policy Refinement Hypothesis
+# AI Agent PoC Phase 2-B Routing Policy Refinement
 
 ## Scope
 
 This document proposes the next hypothesis after Phase 2-A adaptive routing evaluation.
 
 Phase 2-B dry-run calibration is implemented as a routing-only simulation.
-It must not be read as a completed real LLM evaluation result.
+Phase 2-B formal evaluation was then completed with the same 24-run routing
+matrix used in Phase 2-A.
 
 Implemented scope:
 
@@ -16,6 +17,20 @@ Implemented scope:
 - no Embeddings API call
 - no Qdrant call
 - no `/api/generate` default behavior change
+
+Formal evaluation scope:
+
+- Always OFF: single-pass grounded generation
+- Always ON: bounded Agent workflow
+- Routed v2: deterministic `agent-routing-v2-candidate`
+- Provider/model: OpenAI `gpt-5.4-mini`
+- Dataset: 6 public-safe synthetic Agent evaluation cases
+- Run matrix: 24 runs, 8 per mode
+- Scoring: blind manual scoring, seven-axis rubric
+
+This is a system-level orchestration comparison for this tested workload only.
+It is not a general claim about Agent routing, provider/model quality, or
+production readiness.
 
 ## Phase 2-A Observation
 
@@ -292,6 +307,138 @@ For future blind scoring, the blind bundle and manual scoring template include
 the routing-free `GenerationOutput` schema. This preserves blindness because it
 does not include raw bundle data, sample mapping, routing mode, Agent metadata,
 review history, provider, latency, or token usage.
+
+## Formal Evaluation Result
+
+Conclusion Category: **B. Partial routing improvement with quality trade-off**
+
+Phase 2-B fixed the primary Phase 2-A routing failure: routed mode no longer
+collapsed into Always Agent Workflow. The candidate router selected
+`single_pass` for 4 routed runs and `agent_workflow` for 4 routed runs.
+
+The routed path reduced elapsed time and token usage relative to Always ON, but
+it did not beat Always OFF on mean quality. Therefore `agent-routing-v2-candidate`
+is a meaningful improvement over v1 as a cost-aware routing candidate, but it
+should not become the default policy.
+
+## Quality Summary
+
+| Metric | Always OFF | Always ON | Routed v2 |
+|---|---:|---:|---:|
+| Seven-axis mean | 4.732 | 4.661 | 4.696 |
+| Seven-axis median | 4.786 | 4.714 | 4.714 |
+
+Interpretation:
+
+- Routed v2 was higher than Always ON on mean score.
+- Routed v2 was lower than Always OFF on mean score.
+- The difference between modes was small, but the adoption gate requires routed
+  quality not to be materially worse than Always OFF.
+
+## Axis Results
+
+| Axis | OFF | ON | Routed v2 | Routed - OFF | Routed - ON |
+|---|---:|---:|---:|---:|---:|
+| Product-specific rule coverage | 4.250 | 4.250 | 4.250 | 0.000 | 0.000 |
+| Unsupported assumption control | 5.000 | 5.000 | 5.000 | 0.000 | 0.000 |
+| Acceptance criteria specificity | 4.750 | 4.750 | 4.750 | 0.000 | 0.000 |
+| Jira decomposition appropriateness | 5.000 | 4.625 | 4.750 | -0.250 | +0.125 |
+| JSON structure stability | 5.000 | 5.000 | 5.000 | 0.000 | 0.000 |
+| Cross-field consistency | 4.875 | 5.000 | 5.000 | +0.125 | 0.000 |
+| Requirement-to-task traceability | 4.250 | 4.000 | 4.125 | -0.125 | +0.125 |
+
+`jsonStructureStability` should be read with the schema note above. The generated
+outputs were validated by the repository's Zod schema, but the initial blind
+evaluator did not receive the actual schema definition.
+
+## Paired Results
+
+| Comparison | Routed wins | Ties | Routed losses |
+|---|---:|---:|---:|
+| Routed v2 vs Always OFF | 1 | 5 | 2 |
+| Routed v2 vs Always ON | 3 | 3 | 2 |
+
+Pair-level interpretation:
+
+- Routed v2 was more competitive with Always ON than Phase 2-A routed v1.
+- Routed v2 still lost to Always OFF in more pairs than it won.
+- The result supports keeping selective routing experimental rather than default.
+
+## Routing Metrics
+
+| Metric | Value |
+|---|---:|
+| routedRunCount | 8 |
+| agentInvocationRate | 0.500 |
+| avoidedAgentRate | 0.500 |
+| `agent_workflow` routed executions | 4 |
+| `single_pass` routed executions | 4 |
+
+Reason counts:
+
+| Reason | Count |
+|---|---:|
+| multiple risk or failure markers contribute weak routing evidence | 6 |
+| multi-clause requirement contributes weak routing evidence | 4 |
+| candidate score stayed below Agent workflow threshold | 4 |
+| candidate score reached Agent workflow threshold | 4 |
+| ambiguity or planning marker contributes strong routing evidence | 2 |
+| lifecycle, rollback, or cleanup domain contributes strong evidence | 2 |
+| explicit unresolved scope contributes strong evidence | 2 |
+| multiple scope markers contribute weak routing evidence | 2 |
+| validation or security detail contributes strong evidence | 1 |
+| notification exception policy contributes strong evidence | 1 |
+
+## Latency And Usage
+
+| Metric | Always OFF | Always ON | Routed v2 |
+|---|---:|---:|---:|
+| Mean evaluation elapsed ms | 8617.5 | 12335.9 | 11022.9 |
+| Median evaluation elapsed ms | 8494.0 | 12627.5 | 11142.0 |
+| Mean input tokens | 1031.4 | 4492.0 | 2797.8 |
+| Mean output tokens | 1350.0 | 1817.1 | 1562.0 |
+| Mean total tokens | 2381.4 | 6309.1 | 4359.8 |
+| Mean retrieval latency ms | 302.9 | 255.1 | 279.4 |
+
+Cost ratios:
+
+| Ratio | Value |
+|---|---:|
+| Routed v2 / Always ON elapsed ratio | 0.894 |
+| Routed v2 / Always ON token ratio | 0.691 |
+
+Interpretation:
+
+- Routed v2 reduced mean elapsed time relative to Always ON by about 10.6%.
+- Routed v2 reduced mean provider-reported total tokens relative to Always ON by
+  about 30.9%.
+- The reduction came from avoiding Agent workflow for half of routed runs.
+- Routed v2 still remained slower and more token-heavy than Always OFF.
+
+## Adoption Decision
+
+Do not make routed mode the default.
+
+Keep:
+
+- `agent-routing-v2-candidate` as an experimental policy
+- dry-run calibration before real evaluation
+- fail-closed behavior for incomplete evaluation runs
+- blind scoring with routing-free `GenerationOutput` schema included
+
+Do not claim:
+
+- routed mode improves quality over Always OFF
+- deterministic routing is production-ready
+- Agent routing generally reduces cost for all workloads
+- this result generalizes beyond the tested dataset and environment
+
+Recommended next hypotheses:
+
+- add more low-risk and near-ceiling cases to test avoidance behavior
+- evaluate whether retrieval-derived source breadth can improve routing decisions
+- separately analyze cases where routed v2 chose `single_pass` but lost to OFF
+- keep `agent-routing-v1` only as a documented negative baseline
 
 Compare:
 
