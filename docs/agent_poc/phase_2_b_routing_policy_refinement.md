@@ -4,7 +4,18 @@
 
 This document proposes the next hypothesis after Phase 2-A adaptive routing evaluation.
 
-Phase 2-B is not implemented yet. This document is a design note for future work and must not be read as a completed evaluation result.
+Phase 2-B dry-run calibration is implemented as a routing-only simulation.
+It must not be read as a completed real LLM evaluation result.
+
+Implemented scope:
+
+- public-safe routing calibration cases
+- deterministic `agent-routing-v2-candidate`
+- routing-only calibration command
+- no OpenAI API call
+- no Embeddings API call
+- no Qdrant call
+- no `/api/generate` default behavior change
 
 ## Phase 2-A Observation
 
@@ -123,9 +134,9 @@ If calibrated routing still cannot avoid Agent workflow without losing quality, 
 input-side routing is too weak for this workload and should remain experimental.
 ```
 
-## Candidate Policy Direction
+## Candidate Policy Implementation
 
-Possible `agent-routing-v2` behavior:
+Implemented `agent-routing-v2-candidate` behavior:
 
 - Keep deterministic and non-LLM.
 - Keep explainable reasons.
@@ -145,6 +156,7 @@ Candidate scoring:
 | retrievalUniqueDocumentCount >= 5 | 1 | Requires retrieval-before-routing or two-stage routing |
 | lifecycle / rollback / cleanup domain | 2 | Stronger Agent candidate |
 | explicit unresolved scope | 2 | Stronger Agent candidate |
+| validation / security detail | 3 | High-risk input handling and internal detail masking |
 
 Candidate threshold:
 
@@ -153,13 +165,15 @@ agent_workflow if score >= 4
 single_pass otherwise
 ```
 
-This is only a hypothesis. It must be tested with dry-run routing simulation before any real LLM evaluation.
+This policy is implemented only as a candidate policy for dry-run calibration.
+`agent-routing-v1` remains the existing Phase 2-A routing policy for backward
+compatibility and reproducibility.
 
 ## Low-Risk Dataset Gap
 
 Phase 2-A reused six Phase 1-E cases. These were not designed to provide a balanced routing calibration set.
 
-Phase 2-B should add public-safe synthetic cases such as:
+Phase 2-B adds public-safe synthetic calibration cases:
 
 | Candidate case type | Expected route |
 |---|---|
@@ -172,11 +186,19 @@ Phase 2-B should add public-safe synthetic cases such as:
 | Notification policy exception | agent_workflow |
 | Multi-document validation/security behavior | agent_workflow |
 
-The new cases should be committed as public-safe synthetic evaluation data before formal scoring.
+The calibration dataset is stored separately from the Phase 1-E / Phase 2-A
+formal six-case dataset:
+
+```text
+data/agent/evaluation/agent_routing_calibration_cases.json
+```
+
+This avoids changing the existing six-case formal evaluation schema or previous
+history.
 
 ## Dry-Run Gate Before Real LLM Evaluation
 
-Before spending API quota, Phase 2-B should run routing-only simulation.
+Before spending API quota, Phase 2-B runs routing-only simulation.
 
 Required gate:
 
@@ -188,6 +210,15 @@ Required gate:
 | known low-risk cases routed to single-pass | 100% for selected must-avoid cases |
 
 If the dry-run gate fails, do not run real LLM evaluation.
+
+Dry-run command:
+
+```bash
+npm run agent:routing:calibrate
+```
+
+The command reads public-safe calibration cases and evaluates only deterministic
+routing decisions. It does not call a provider, Qdrant, or Embeddings API.
 
 ## Evaluation Plan
 

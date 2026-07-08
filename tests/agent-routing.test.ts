@@ -2,9 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   analyzeAgentRoutingSignals,
   agentRoutingDecisionSchema,
+  agentRoutingCandidatePolicyVersion,
   agentRoutingPolicyVersion,
+  createAgentRoutingCandidateDecision,
   createAgentRoutingDecision
 } from "@/lib/agent/routing";
+import {
+  loadAgentRoutingCalibrationCases,
+  runAgentRoutingDryRunCalibration
+} from "@/lib/agent/routing-calibration";
 import {
   assertNoEvaluationRubricLeak,
   buildAgentRoutingDecisionForEvaluation,
@@ -87,6 +93,65 @@ describe("Agent Phase 2-A deterministic routing policy", () => {
 
     expect(second).toEqual(first);
     expect(JSON.stringify(first)).not.toContain(requirementMemo);
+  });
+});
+
+describe("Agent Phase 2-B routing dry-run calibration", () => {
+  it("keeps the candidate policy separate from the Phase 2-A policy", () => {
+    const input = {
+      requirementMemo:
+        "プロフィール画像を差し替えるとき、保存に成功してから参照先を切り替えたい。失敗時は旧画像を維持し、確認事項も整理したい。"
+    };
+    const baselineDecision = createAgentRoutingDecision(input);
+    const candidateDecision = createAgentRoutingCandidateDecision(input);
+
+    expect(baselineDecision.policyVersion).toBe(agentRoutingPolicyVersion);
+    expect(candidateDecision.policyVersion).toBe(
+      agentRoutingCandidatePolicyVersion
+    );
+    expect(candidateDecision.signals.candidateScore).toBeGreaterThanOrEqual(4);
+    expect(candidateDecision.mode).toBe("agent_workflow");
+  });
+
+  it("routes low-risk calibration-style requests to single-pass", () => {
+    const decision = createAgentRoutingCandidateDecision({
+      requirementMemo: "設定画面の保存ボタンの文言を「保存する」に変更したい。"
+    });
+
+    expect(decision.mode).toBe("single_pass");
+    expect(decision.signals.candidateScore).toBe(0);
+    expect(JSON.stringify(decision)).not.toContain("保存ボタン");
+  });
+
+  it("routes notification exception policy to Agent workflow", () => {
+    const decision = createAgentRoutingCandidateDecision({
+      requirementMemo:
+        "ユーザーがメール通知を無効化できるようにしたい。ただしセキュリティ通知やパスワード変更通知は止めないようにしたい。停止対象と必須通知の例外が矛盾しないように整理したい。"
+    });
+
+    expect(decision.mode).toBe("agent_workflow");
+    expect(decision.signals.notificationExceptionMarkerCount).toBeGreaterThanOrEqual(
+      3
+    );
+    expect(decision.reasons).toContain(
+      "candidate score reached Agent workflow threshold"
+    );
+  });
+
+  it("passes the public-safe dry-run calibration gate", async () => {
+    const cases = await loadAgentRoutingCalibrationCases();
+    const calibration = runAgentRoutingDryRunCalibration(cases);
+
+    expect(calibration.summary.totalCases).toBe(8);
+    expect(calibration.summary.actualModeCounts.single_pass).toBeGreaterThanOrEqual(
+      2
+    );
+    expect(
+      calibration.summary.actualModeCounts.agent_workflow
+    ).toBeGreaterThanOrEqual(2);
+    expect(calibration.summary.lowRiskAvoidanceRate).toBe(1);
+    expect(calibration.summary.highRiskRouteRate).toBe(1);
+    expect(calibration.summary.gatePassed).toBe(true);
   });
 });
 

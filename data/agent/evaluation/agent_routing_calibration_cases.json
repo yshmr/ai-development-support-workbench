@@ -1,0 +1,58 @@
+[
+  {
+    "caseId": "ROUTE-CAL-001",
+    "title": "Simple button label update",
+    "requirementMemo": "設定画面の保存ボタンの文言を「保存する」に変更したい。",
+    "expectedRoute": "single_pass",
+    "rationale": "Clear copy-only change with no cross-field, lifecycle, validation, or unresolved scope risk."
+  },
+  {
+    "caseId": "ROUTE-CAL-002",
+    "title": "Static empty state message",
+    "requirementMemo": "検索結果が0件のときに「該当する結果はありません」と表示したい。",
+    "expectedRoute": "single_pass",
+    "rationale": "Small UI behavior with a concrete condition and no policy or multi-document consistency concern."
+  },
+  {
+    "caseId": "ROUTE-CAL-003",
+    "title": "Display existing optional profile field",
+    "requirementMemo": "プロフィール画面に部署名を表示したい。APIレスポンスにはdepartmentNameが既に含まれている。",
+    "expectedRoute": "single_pass",
+    "rationale": "Implementation is bounded to displaying an existing response field."
+  },
+  {
+    "caseId": "ROUTE-CAL-004",
+    "title": "Simple existing sort parameter",
+    "requirementMemo": "検索結果を作成日順でも並び替えたい。既存のsort query parameterにcreated_at_descを追加したい。",
+    "expectedRoute": "single_pass",
+    "rationale": "Clear additive parameter support with no stated ambiguity or operational risk."
+  },
+  {
+    "caseId": "ROUTE-CAL-005",
+    "title": "Profile image lifecycle rollback",
+    "requirementMemo": "プロフィール画像を差し替えるとき、新しい画像の保存に成功してから参照先を切り替えたい。切替や保存に失敗した場合は旧画像を維持し、不完全な一時ファイルを残さないようにしたい。旧画像の削除方針も確認事項として整理したい。",
+    "expectedRoute": "agent_workflow",
+    "rationale": "Lifecycle, rollback, cleanup, and unresolved policy details create high cross-field consistency risk."
+  },
+  {
+    "caseId": "ROUTE-CAL-006",
+    "title": "Ambiguous image cache scope",
+    "requirementMemo": "プロフィール画像の表示をもっと安定させたい。ユーザーが画像を変更した直後に古い画像が見えないようにしたいが、CDNや複数端末への反映範囲はまだ決まっていない。決まっていない部分は確認事項として残したい。",
+    "expectedRoute": "agent_workflow",
+    "rationale": "Ambiguous cache, multi-device, and unresolved scope details should trigger planning and review."
+  },
+  {
+    "caseId": "ROUTE-CAL-007",
+    "title": "Notification exception policy",
+    "requirementMemo": "ユーザーがメール通知を無効化できるようにしたい。ただしセキュリティ通知やパスワード変更通知は止めないようにしたい。停止対象と必須通知の例外が矛盾しないように整理したい。",
+    "expectedRoute": "agent_workflow",
+    "rationale": "Exception policy and cross-field consistency concerns make review valuable."
+  },
+  {
+    "caseId": "ROUTE-CAL-008",
+    "title": "Upload validation and internal detail masking",
+    "requirementMemo": "プロフィール画像アップロードで、不正な画像を保存しないようにしたい。5MB超過、JPG/PNG以外、画像として読み込めないファイルをそれぞれ分かるエラーにしたい。内部例外やstorage情報は画面に出したくない。",
+    "expectedRoute": "agent_workflow",
+    "rationale": "Validation, user-facing error mapping, and internal detail masking create safety and consistency risk."
+  }
+]

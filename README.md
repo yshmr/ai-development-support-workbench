@@ -306,10 +306,17 @@ Conclusion:
 
 `agent-routing-v1`は今回のdatasetではcost-aware selective orchestrationとして成立しませんでした。Routed modeは品質平均でAlways OFF / Always ONを下回り、Agent回避も発生しませんでした。この結果はnegative resultとして残し、routed modeをdefaultにはしません。
 
+Phase 2-Bでは、実LLM評価へ進む前のdry-run calibrationとして、公開安全なsynthetic casesと`agent-routing-v2-candidate`を追加しました。これはrouting-only simulationであり、OpenAI API、Embeddings API、Qdrantを呼びません。
+
+```bash
+npm run agent:routing:calibrate
+```
+
 詳細:
 
 - [AI Agent Phase 2-A adaptive routing design](docs/agent_poc/phase_2_a_adaptive_agent_routing.md)
 - [AI Agent Phase 2-A adaptive routing evaluation results](docs/agent_poc/phase_2_a_adaptive_agent_routing_evaluation_results.md)
+- [AI Agent Phase 2-B routing policy refinement](docs/agent_poc/phase_2_b_routing_policy_refinement.md)
 
 ## Tech Stack
 
@@ -352,6 +359,7 @@ Local runtime artifacts such as `data/generations.json`, `data/agent-runs.json`,
 - [RAG context diversity evaluation](docs/rag_poc/context_diversity_evaluation.md)
 - [AI Agent PoC spec](docs/agent_poc/agent_poc_spec_v0_1.md)
 - [AI Agent Phase 1-E evaluation results](docs/agent_poc/phase_1_e_agent_workflow_evaluation_results.md)
+- [AI Agent Phase 2-B routing policy refinement](docs/agent_poc/phase_2_b_routing_policy_refinement.md)
 
 ## Setup / Run
 
