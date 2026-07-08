@@ -18,5 +18,6 @@ data/agent/evaluation/phase_2_a_*.json
 data/agent/evaluation/phase_2_a_*.md
 data/agent/evaluation/phase_2_b_*.json
 data/agent/evaluation/phase_2_b_*.md
+data/agent/evaluation/export/
 .env*.local
 qdrant_storage/

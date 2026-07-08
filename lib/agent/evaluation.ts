@@ -172,6 +172,11 @@ export const agentEvaluationCasesSchema = z
   .length(6);
 
 const manualAxisScoreSchema = z.number().int().min(1).max(5);
+export const scoringMethodSchema = z.enum([
+  "blind-manual",
+  "context-isolated-blind-llm",
+  "secondary-blind-llm-check"
+]);
 
 export const manualQualityScoreSchema = z.object({
   productSpecificRuleCoverage: manualAxisScoreSchema,
@@ -191,7 +196,7 @@ export const manualScoreEntrySchema = z.object({
 
 export const manualScoresFileSchema = z.object({
   evaluationId: z.literal("agent-phase-1-e"),
-  scoringMethod: z.literal("blind-manual"),
+  scoringMethod: scoringMethodSchema,
   scores: z.array(manualScoreEntrySchema)
 });
 
@@ -359,6 +364,7 @@ export type RawEvaluationBundle = z.infer<typeof rawEvaluationBundleSchema>;
 export type BlindEvaluationBundle = z.infer<typeof blindEvaluationBundleSchema>;
 export type SampleMappingFile = z.infer<typeof sampleMappingFileSchema>;
 export type ManualScoresFile = z.infer<typeof manualScoresFileSchema>;
+export type ScoringMethod = z.infer<typeof scoringMethodSchema>;
 export type ManualQualityScore = z.infer<typeof manualQualityScoreSchema>;
 export type RoutingEvaluationMode = z.infer<typeof routingEvaluationModeSchema>;
 export type RoutingExecutionMode = z.infer<typeof routingExecutionModeSchema>;
@@ -2024,7 +2030,7 @@ export function createEvaluationSummary(input: {
   return {
     evaluationId: "agent-phase-1-e",
     createdAt: new Date().toISOString(),
-    scoringMethod: "blind-manual",
+    scoringMethod: validatedScores.scoringMethod,
     runMatrix: input.rawBundle.runMatrix,
     quality,
     agentMetrics: aggregateAgentMetrics(input.rawBundle),
@@ -2052,7 +2058,7 @@ export function createRoutingEvaluationSummary(input: {
   return {
     evaluationId: input.rawBundle.evaluationId,
     createdAt: new Date().toISOString(),
-    scoringMethod: "blind-manual",
+    scoringMethod: validatedScores.scoringMethod,
     runMatrix: input.rawBundle.runMatrix,
     quality,
     routingMetrics: aggregateRoutingDecisionMetrics(input.rawBundle),

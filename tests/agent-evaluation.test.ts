@@ -1,5 +1,12 @@
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { generationOutputJsonSchema } from "@/lib/schema";
+import {
+  exportAgentBlindEvaluationPackage,
+  importAgentBlindEvaluationScores
+} from "@/lib/agent/blind-evaluation-package";
 import {
   aggregateAgentMetrics,
   aggregateLatencyAndUsage,
@@ -244,11 +251,15 @@ function completeManualScores(sampleIds: string[], onWins = true): ManualScoresF
 function completeRoutingManualScores(
   sampleIds: string[],
   evaluationId: "agent-phase-2-a-routing" | "agent-phase-2-b-routing-v2" =
-    "agent-phase-2-a-routing"
+    "agent-phase-2-a-routing",
+  scoringMethod:
+    | "blind-manual"
+    | "context-isolated-blind-llm"
+    | "secondary-blind-llm-check" = "blind-manual"
 ): RoutingManualScoresFile {
   return routingManualScoresFileSchema.parse({
     evaluationId,
-    scoringMethod: "blind-manual",
+    scoringMethod,
     scores: sampleIds.map((sampleId, index) => ({
       sampleId,
       scores: {
@@ -564,6 +575,117 @@ describe("Agent Phase 2-A routing evaluation behavior", () => {
       summary.routingMetrics.routedExecutionModeCounts.agent_workflow
     ).toBeGreaterThan(0);
     expect(() => assertBlindBundleHasNoModeLeak(blindBundle)).not.toThrow();
+  });
+
+  it("exports and imports context-isolated blind evaluation packages without mode leaks", async () => {
+    const rawBundle = await createRoutingStubBundle({
+      evaluationId: "agent-phase-2-b-routing-v2",
+      useCandidateRouting: true
+    });
+    const { blindBundle, mappingFile } = createBlindRoutingBundleAndMapping(rawBundle);
+    const packageDirectory = await mkdtemp(
+      path.join(os.tmpdir(), "agent-blind-package-")
+    );
+
+    try {
+      const exported = await exportAgentBlindEvaluationPackage({
+        phase: "phase_2_b",
+        outputDirectory: packageDirectory,
+        blindBundle
+      });
+      const exportedBlindBundle = JSON.parse(
+        await readFile(
+          path.join(packageDirectory, "input", "blind_bundle.json"),
+          "utf8"
+        )
+      );
+      const generationSchema = JSON.parse(
+        await readFile(
+          path.join(packageDirectory, "input", "generation_output_schema.json"),
+          "utf8"
+        )
+      );
+      const outputSchema = JSON.parse(
+        await readFile(
+          path.join(packageDirectory, "input", "output_schema.json"),
+          "utf8"
+        )
+      );
+      const rubric = await readFile(
+        path.join(packageDirectory, "input", "scoring_rubric.md"),
+        "utf8"
+      );
+      const prompt = await readFile(
+        path.join(packageDirectory, "scoring_prompt.md"),
+        "utf8"
+      );
+      const serializedPackageInputs = JSON.stringify({
+        exportedBlindBundle,
+        generationSchema,
+        outputSchema,
+        rubric,
+        prompt
+      });
+
+      expect(exported).toEqual({
+        outputDirectory: packageDirectory,
+        evaluationId: "agent-phase-2-b-routing-v2",
+        sampleCount: 24
+      });
+      expect(exportedBlindBundle.generationOutputSchema).toEqual(
+        generationOutputJsonSchema
+      );
+      expect(generationSchema).toEqual(generationOutputJsonSchema);
+      expect(outputSchema.properties.scoringMethod.enum).toContain(
+        "context-isolated-blind-llm"
+      );
+      expect(rubric).toContain("jsonStructureStability");
+      expect(prompt).toContain("context-isolated-blind-llm");
+      expect(serializedPackageInputs).not.toContain("routedExecutionMode");
+      expect(serializedPackageInputs).not.toContain("agent_workflow");
+      expect(serializedPackageInputs).not.toContain("single_pass");
+      expect(serializedPackageInputs).not.toContain("reviewHistory");
+      expect(serializedPackageInputs).not.toContain("providerLatencyMs");
+      expect(serializedPackageInputs).not.toContain("OPENAI_API_KEY");
+
+      const scoreFilePath = path.join(
+        packageDirectory,
+        "output",
+        "manual_scores.json"
+      );
+      const manualScores = completeRoutingManualScores(
+        blindBundle.samples.map((sample) => sample.sampleId),
+        "agent-phase-2-b-routing-v2",
+        "context-isolated-blind-llm"
+      );
+      await writeFile(scoreFilePath, JSON.stringify(manualScores, null, 2), "utf8");
+
+      const imported = await importAgentBlindEvaluationScores({
+        phase: "phase_2_b",
+        scoreFilePath,
+        outputPath: path.join(packageDirectory, "imported_scores.json"),
+        blindBundle
+      });
+      const importedScores = routingManualScoresFileSchema.parse(
+        JSON.parse(await readFile(imported.outputPath, "utf8"))
+      );
+      const summary = createRoutingEvaluationSummary({
+        rawBundle,
+        blindBundle,
+        mappingFile,
+        manualScores: importedScores
+      });
+
+      expect(imported).toEqual({
+        outputPath: path.join(packageDirectory, "imported_scores.json"),
+        evaluationId: "agent-phase-2-b-routing-v2",
+        scoreCount: 24
+      });
+      expect(importedScores.scoringMethod).toBe("context-isolated-blind-llm");
+      expect(summary.scoringMethod).toBe("context-isolated-blind-llm");
+    } finally {
+      await rm(packageDirectory, { recursive: true, force: true });
+    }
   });
 
   it("rejects routing evaluation bundles with failed runs before blind scoring", async () => {

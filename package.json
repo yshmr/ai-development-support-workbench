@@ -26,7 +26,9 @@
     "agent:routing:evaluate:run": "tsx scripts/agent-routing-evaluate-run.ts",
     "agent:routing:evaluate:summarize": "tsx scripts/agent-routing-evaluate-summarize.ts",
     "agent:routing:v2:evaluate:run": "tsx scripts/agent-routing-v2-evaluate-run.ts",
-    "agent:routing:v2:evaluate:summarize": "tsx scripts/agent-routing-v2-evaluate-summarize.ts"
+    "agent:routing:v2:evaluate:summarize": "tsx scripts/agent-routing-v2-evaluate-summarize.ts",
+    "agent:evaluation:export-blind-package": "tsx scripts/agent-evaluation-export-blind-package.ts",
+    "agent:evaluation:import-scores": "tsx scripts/agent-evaluation-import-scores.ts"
   },
   "dependencies": {
     "@next/env": "^15.5.20",
