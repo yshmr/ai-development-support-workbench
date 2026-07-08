@@ -24,6 +24,13 @@ export const agentRoutingContractCalibrationCasesPath = path.join(
   "evaluation",
   "agent_routing_contract_calibration_cases.json"
 );
+export const agentRoutingContractTargetCasesPath = path.join(
+  process.cwd(),
+  "data",
+  "agent",
+  "evaluation",
+  "agent_contract_detail_target_cases.json"
+);
 
 export const agentRoutingCalibrationCaseSchema = z.object({
   caseId: z.string().regex(/^ROUTE-(?:CAL|CONTRACT)-\d{3}$/),
@@ -77,6 +84,24 @@ export type AgentRoutingDryRunCalibration = {
   results: AgentRoutingCalibrationResult[];
 };
 
+export type AgentRoutingContractTargetCalibrationSummary = {
+  policyVersion: string;
+  totalCases: number;
+  expectedChecklistCount: number;
+  actualChecklistRecommendedCount: number;
+  routePassCount: number;
+  checklistPassCount: number;
+  passCount: number;
+  passRate: number;
+  checklistRecommendedRate: number;
+  gatePassed: boolean;
+};
+
+export type AgentRoutingContractTargetCalibration = {
+  summary: AgentRoutingContractTargetCalibrationSummary;
+  results: AgentRoutingCalibrationResult[];
+};
+
 function assertUniqueCaseIds(cases: AgentRoutingCalibrationCase[]) {
   const seen = new Set<string>();
   const duplicate = cases.find((testCase) => {
@@ -123,6 +148,13 @@ export async function loadAgentRoutingCalibrationCases(
 
 export async function loadAgentRoutingContractCalibrationCases(
   filePath = agentRoutingContractCalibrationCasesPath
+): Promise<AgentRoutingCalibrationCase[]> {
+  const raw = await readFile(filePath, "utf8");
+  return validateAgentRoutingCalibrationCases(JSON.parse(raw));
+}
+
+export async function loadAgentRoutingContractTargetCases(
+  filePath = agentRoutingContractTargetCasesPath
 ): Promise<AgentRoutingCalibrationCase[]> {
   const raw = await readFile(filePath, "utf8");
   return validateAgentRoutingCalibrationCases(JSON.parse(raw));
@@ -259,6 +291,79 @@ export function runAgentRoutingContractDryRunCalibration(
   );
 }
 
+export function runAgentRoutingContractTargetCalibration(
+  cases: AgentRoutingCalibrationCase[]
+): AgentRoutingContractTargetCalibration {
+  const validatedCases = validateAgentRoutingCalibrationCases(cases);
+  const results = validatedCases.map((testCase) => {
+    const baselineV1Decision = createAgentRoutingDecision({
+      requirementMemo: testCase.requirementMemo
+    });
+    const candidateDecision = createAgentRoutingContractCandidateDecision({
+      requirementMemo: testCase.requirementMemo
+    });
+    const actualLightweightChecklist =
+      candidateDecision.signals.lightweightChecklistRecommended;
+    const routePassed = candidateDecision.mode === testCase.expectedRoute;
+    const checklistPassed =
+      actualLightweightChecklist === testCase.expectedLightweightChecklist;
+
+    return {
+      caseId: testCase.caseId,
+      title: testCase.title,
+      expectedRoute: testCase.expectedRoute,
+      actualRoute: candidateDecision.mode,
+      passed: routePassed && checklistPassed,
+      expectedLightweightChecklist: testCase.expectedLightweightChecklist,
+      actualLightweightChecklist,
+      baselineV1Route: baselineV1Decision.mode,
+      candidateDecision,
+      baselineV1Decision
+    };
+  });
+  const totalCases = results.length;
+  const expectedChecklistCount = results.filter(
+    (result) => result.expectedLightweightChecklist === true
+  ).length;
+  const actualChecklistRecommendedCount = results.filter(
+    (result) => result.actualLightweightChecklist === true
+  ).length;
+  const routePassCount = results.filter(
+    (result) => result.actualRoute === result.expectedRoute
+  ).length;
+  const checklistPassCount = results.filter(
+    (result) =>
+      result.actualLightweightChecklist === result.expectedLightweightChecklist
+  ).length;
+  const passCount = results.filter((result) => result.passed).length;
+
+  return {
+    summary: {
+      policyVersion:
+        results[0]?.candidateDecision.policyVersion ??
+        "agent-routing-v3-contract-candidate",
+      totalCases,
+      expectedChecklistCount,
+      actualChecklistRecommendedCount,
+      routePassCount,
+      checklistPassCount,
+      passCount,
+      passRate: ratio(passCount, totalCases),
+      checklistRecommendedRate: ratio(
+        actualChecklistRecommendedCount,
+        totalCases
+      ),
+      gatePassed:
+        totalCases >= 8 &&
+        expectedChecklistCount === totalCases &&
+        actualChecklistRecommendedCount === totalCases &&
+        routePassCount === totalCases &&
+        checklistPassCount === totalCases
+    },
+    results
+  };
+}
+
 export function formatAgentRoutingDryRunCalibration(
   calibration: AgentRoutingDryRunCalibration
 ): string {
@@ -304,4 +409,34 @@ export function formatAgentRoutingDryRunCalibration(
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n");
+}
+
+export function formatAgentRoutingContractTargetCalibration(
+  calibration: AgentRoutingContractTargetCalibration
+): string {
+  const rows = calibration.results.map((result) =>
+    [
+      result.caseId,
+      result.expectedRoute,
+      result.actualRoute,
+      String(result.actualLightweightChecklist ?? false),
+      result.passed ? "pass" : "fail"
+    ].join(" | ")
+  );
+
+  return [
+    "Agent Phase 2-E contract-detail target calibration",
+    "",
+    `policyVersion: ${calibration.summary.policyVersion}`,
+    `totalCases: ${calibration.summary.totalCases}`,
+    `expectedChecklistCount: ${calibration.summary.expectedChecklistCount}`,
+    `actualChecklistRecommendedCount: ${calibration.summary.actualChecklistRecommendedCount}`,
+    `passRate: ${calibration.summary.passRate.toFixed(3)}`,
+    `checklistRecommendedRate: ${calibration.summary.checklistRecommendedRate.toFixed(3)}`,
+    `gatePassed: ${calibration.summary.gatePassed}`,
+    "",
+    "caseId | expected | actual | checklist | result",
+    "---|---|---|---|---",
+    ...rows
+  ].join("\n");
 }

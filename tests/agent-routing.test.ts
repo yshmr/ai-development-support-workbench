@@ -22,7 +22,9 @@ import {
 } from "@/lib/agent/routing";
 import {
   loadAgentRoutingContractCalibrationCases,
+  loadAgentRoutingContractTargetCases,
   loadAgentRoutingCalibrationCases,
+  runAgentRoutingContractTargetCalibration,
   runAgentRoutingContractDryRunCalibration,
   runAgentRoutingDryRunCalibration
 } from "@/lib/agent/routing-calibration";
@@ -230,6 +232,28 @@ describe("Agent Phase 2-C contract-detail routing calibration", () => {
     expect(calibration.summary.checklistExpectationPassRate).toBe(1);
     expect(calibration.summary.checklistRecommendedRate).toBe(0.375);
     expect(calibration.summary.gatePassed).toBe(true);
+  });
+
+  it("passes the Phase 2-E target checklist dataset gate", async () => {
+    const cases = await loadAgentRoutingContractTargetCases();
+    const calibration = runAgentRoutingContractTargetCalibration(cases);
+
+    expect(calibration.summary.policyVersion).toBe(
+      agentRoutingContractCandidatePolicyVersion
+    );
+    expect(calibration.summary.totalCases).toBe(8);
+    expect(calibration.summary.expectedChecklistCount).toBe(8);
+    expect(calibration.summary.actualChecklistRecommendedCount).toBe(8);
+    expect(calibration.summary.routePassCount).toBe(8);
+    expect(calibration.summary.checklistPassCount).toBe(8);
+    expect(calibration.summary.passRate).toBe(1);
+    expect(calibration.summary.checklistRecommendedRate).toBe(1);
+    expect(calibration.summary.gatePassed).toBe(true);
+    expect(
+      calibration.results.every(
+        (result) => result.candidateDecision.signals.candidateScore! < 4
+      )
+    ).toBe(true);
   });
 });
 

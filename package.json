@@ -28,6 +28,7 @@
     "agent:routing:contract:evaluate": "tsx scripts/agent-routing-contract-evaluate.ts",
     "agent:routing:contract:evaluate:run": "tsx scripts/agent-routing-contract-evaluate-run.ts",
     "agent:routing:contract:evaluate:summarize": "tsx scripts/agent-routing-contract-evaluate-summarize.ts",
+    "agent:routing:contract:target-calibrate": "tsx scripts/agent-routing-contract-target-calibrate.ts",
     "agent:routing:evaluate:run": "tsx scripts/agent-routing-evaluate-run.ts",
     "agent:routing:evaluate:summarize": "tsx scripts/agent-routing-evaluate-summarize.ts",
     "agent:routing:v2:evaluate:run": "tsx scripts/agent-routing-v2-evaluate-run.ts",

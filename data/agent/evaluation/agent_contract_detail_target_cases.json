@@ -1,0 +1,66 @@
+[
+  {
+    "caseId": "ROUTE-CONTRACT-101",
+    "title": "Status filter query contract",
+    "requirementMemo": "検索結果をopen、in_progress、resolved、archivedで絞り込みたい。複数ステータスを選べて、URL query parameterのstatusへcomma separated valueとして保持したい。初期並び順は関連度順で、0件のときは空状態を表示したい。",
+    "expectedRoute": "single_pass",
+    "expectedLightweightChecklist": true,
+    "rationale": "Low-risk query and enum contract with default state and empty-state details should remain single-pass but use the checklist."
+  },
+  {
+    "caseId": "ROUTE-CONTRACT-102",
+    "title": "Sort option query contract",
+    "requirementMemo": "検索結果を作成日順でも並び替えたい。既存のsort query parameterにcreated_at_descを追加し、未指定時の初期並び順は関連度順のままにしたい。URLを共有したときもsortの選択状態を復元したい。",
+    "expectedRoute": "single_pass",
+    "expectedLightweightChecklist": true,
+    "rationale": "Additive sort query contract with default and persistence expectations should be checklist-covered without Agent workflow."
+  },
+  {
+    "caseId": "ROUTE-CONTRACT-103",
+    "title": "Settings tab query persistence",
+    "requirementMemo": "設定画面の選択中タブをURL queryのtabに保持し、ページ再読み込み後も同じタブを復元したい。tab未指定時はprofileタブを初期表示にしたい。",
+    "expectedRoute": "single_pass",
+    "expectedLightweightChecklist": true,
+    "rationale": "UI state persistence and default tab behavior are contract-detail concerns but low operational risk."
+  },
+  {
+    "caseId": "ROUTE-CONTRACT-104",
+    "title": "Pagination query persistence",
+    "requirementMemo": "検索結果一覧でpage query parameterを使ってページ番号を保持したい。page未指定時は1ページ目を初期表示し、URL再読み込み後も同じページ番号を復元したい。0件のときは空状態を表示したい。",
+    "expectedRoute": "single_pass",
+    "expectedLightweightChecklist": true,
+    "rationale": "Pagination URL contract combines query, default state, persistence, and empty state details."
+  },
+  {
+    "caseId": "ROUTE-CONTRACT-105",
+    "title": "Date range query serialization",
+    "requirementMemo": "一覧をcreated_fromとcreated_toのURL query parameterで期間絞り込みしたい。日付はYYYY-MM-DD形式で保持し、未指定時は全期間を初期表示にしたい。URL共有後も期間条件を復元したい。",
+    "expectedRoute": "single_pass",
+    "expectedLightweightChecklist": true,
+    "rationale": "Date query serialization and restoration are precise contract details suitable for checklist guidance."
+  },
+  {
+    "caseId": "ROUTE-CONTRACT-106",
+    "title": "View mode query default",
+    "requirementMemo": "商品一覧の表示形式をgridとlistで切り替えたい。選択値はview query parameterに保持し、未指定時はgridを初期表示にしたい。URL再読み込み後も選択中の表示形式を復元したい。",
+    "expectedRoute": "single_pass",
+    "expectedLightweightChecklist": true,
+    "rationale": "Enum-like view mode, query persistence, and default display behavior are low-risk contract details."
+  },
+  {
+    "caseId": "ROUTE-CONTRACT-107",
+    "title": "Language query default",
+    "requirementMemo": "ヘルプページの表示言語をjaとenで切り替えたい。選択値はlang query parameterに保持し、未指定時はjaを初期表示にしたい。共有されたURLから同じ言語表示を復元したい。",
+    "expectedRoute": "single_pass",
+    "expectedLightweightChecklist": true,
+    "rationale": "Language enum, default, and URL restoration details should trigger checklist attention."
+  },
+  {
+    "caseId": "ROUTE-CONTRACT-108",
+    "title": "Search keyword query contract",
+    "requirementMemo": "検索キーワードをq query parameterに保持したい。未入力時は全件を初期表示し、URL再読み込み後もqの入力値と検索結果を復元したい。検索結果が0件の場合は空状態を表示したい。",
+    "expectedRoute": "single_pass",
+    "expectedLightweightChecklist": true,
+    "rationale": "Keyword query persistence, default all-results behavior, and empty-state expectations are checklist-suitable details."
+  }
+]
