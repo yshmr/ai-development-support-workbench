@@ -347,6 +347,8 @@ npm run agent:routing:contract:evaluate
 
 Phase 2-Dでは、このbridgeを使ったprovider-backed formal evaluationを実行できるようにしています。実行時は通常PowerShellでDocker/Qdrantと`.env.local`を確認してから、`npm run agent:routing:contract:evaluate:run`を実行します。
 
+Phase 2-D formal evaluationでは、Routed v3 + checklist bridgeはAlways OFFと同じseven-axis mean 4.768、Always ON 4.679を上回りました。RoutedはAlways ON比でelapsed ratio 0.650、token ratio 0.746となり、品質をOFF同等に保ちながらAlways ONより低costでした。ただし、Always OFFを上回ったわけではないため、default化はせずcandidate policyとして扱います。
+
 詳細:
 
 - [AI Agent Phase 2-A adaptive routing design](docs/agent_poc/phase_2_a_adaptive_agent_routing.md)

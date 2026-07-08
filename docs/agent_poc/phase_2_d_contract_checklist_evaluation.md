@@ -86,6 +86,100 @@ After blind scoring and summarization:
 These local evaluation outputs are not meant to be committed until they have
 been reviewed for safety and relevance.
 
+## Formal Evaluation Result
+
+Execution date:
+
+- local PowerShell / local Qdrant / configured `.env.local`
+- evaluationId: `agent-phase-2-d-contract-checklist`
+- scoringMethod: `context-isolated-blind-llm`
+- sample count: 24
+- failed runs: 0
+
+Quality:
+
+| Mode | Seven-axis mean | Median |
+|---|---:|---:|
+| Always OFF | 4.768 | 4.929 |
+| Always ON | 4.679 | 4.786 |
+| Routed v3 + checklist bridge | 4.768 | 4.929 |
+
+Paired comparison:
+
+| Comparison | Routed wins | Other wins | Ties |
+|---|---:|---:|---:|
+| Routed vs Always OFF | 1 | 1 | 6 |
+| Routed vs Always ON | 5 | 0 | 3 |
+
+Axis-level deltas:
+
+| Axis | Routed - OFF | Routed - ON |
+|---|---:|---:|
+| productSpecificRuleCoverage | 0.000 | 0.000 |
+| unsupportedAssumptionControl | 0.000 | +0.125 |
+| acceptanceCriteriaSpecificity | +0.125 | +0.250 |
+| jiraDecompositionAppropriateness | -0.125 | +0.375 |
+| jsonStructureStability | 0.000 | 0.000 |
+| crossFieldConsistency | 0.000 | -0.125 |
+| requirementToTaskTraceability | 0.000 | 0.000 |
+
+Routing and cost:
+
+| Metric | Result |
+|---|---:|
+| Routed runs | 8 |
+| Routed single-pass runs | 4 |
+| Routed Agent workflow runs | 4 |
+| Agent invocation rate | 0.500 |
+| Avoided Agent rate | 0.500 |
+| Checklist-recommended routed runs | 1 |
+| Routed / Always ON elapsed ratio | 0.650 |
+| Routed / Always ON token ratio | 0.746 |
+
+Latency and usage:
+
+| Mode | Mean elapsed ms | Median elapsed ms | Mean total tokens |
+|---|---:|---:|---:|
+| Always OFF | 10532.125 | 10254.500 | 2315.250 |
+| Always ON | 21930.000 | 20697.000 | 7308.000 |
+| Routed v3 + checklist bridge | 14254.000 | 12599.000 | 5454.750 |
+
+Observed checklist bridge usage:
+
+- `ROUTE-RUN-014`
+- case: `AGENT-005`
+- routedExecutionMode: `single_pass`
+- `lightweightChecklistRecommended: true`
+- elapsed: 7917 ms
+- totalTokens: 2363
+
+## Result Interpretation
+
+Phase 2-D did not show a quality lift over Always OFF on this dataset. Routed v3
+matched the Always OFF seven-axis mean and median, with one routed win, one OFF
+win, and six ties.
+
+Compared with Always ON, Routed v3 performed better in this run:
+
+- higher seven-axis mean: 4.768 vs 4.679
+- no pairwise losses against Always ON
+- lower mean elapsed time
+- lower mean token usage
+
+The checklist bridge was exercised in one routed single-pass run. This validates
+that the contract-detail checklist path can be applied without forcing all
+detail-dense cases into Agent workflow, but the sample count is too small to
+claim general checklist quality improvement.
+
+Practical conclusion for this PoC phase:
+
+- keep Always OFF / grounded single-pass as the quality baseline
+- keep Routed v3 + checklist bridge as a candidate for cost-aware selective
+  orchestration
+- do not make Routed v3 the default solely from this result
+- gather more targeted low-risk detail-dense cases before treating the checklist
+  bridge as a proven quality improvement
+
 ## Interpretation
 
 Phase 2-D should answer a narrow question:
