@@ -7,6 +7,8 @@ import {
   agentEvaluationManualScoresPath,
   agentRoutingEvaluationBlindBundlePath,
   agentRoutingEvaluationManualScoresPath,
+  agentRoutingContractEvaluationBlindBundlePath,
+  agentRoutingContractEvaluationManualScoresPath,
   agentRoutingV2EvaluationBlindBundlePath,
   agentRoutingV2EvaluationManualScoresPath,
   assertBlindBundleHasNoModeLeak,
@@ -28,7 +30,8 @@ import {
 export const blindEvaluationPhaseSchema = z.enum([
   "phase_1_e",
   "phase_2_a",
-  "phase_2_b"
+  "phase_2_b",
+  "phase_2_d"
 ]);
 
 export type BlindEvaluationPhase = z.infer<typeof blindEvaluationPhaseSchema>;
@@ -195,11 +198,27 @@ function getPhaseConfig(phase: BlindEvaluationPhase): PhaseConfig {
     };
   }
 
+  if (phase === "phase_2_b") {
+    return {
+      phase,
+      evaluationId: "agent-phase-2-b-routing-v2",
+      blindBundlePath: agentRoutingV2EvaluationBlindBundlePath,
+      manualScoresPath: agentRoutingV2EvaluationManualScoresPath,
+      blindSchema: blindRoutingEvaluationBundleSchema,
+      scoreSchema: routingManualScoresFileSchema,
+      validateScores: (scores, blindBundle) =>
+        validateRoutingManualScores(
+          scores as RoutingManualScoresFile,
+          blindBundle as BlindRoutingEvaluationBundle
+        )
+    };
+  }
+
   return {
     phase,
-    evaluationId: "agent-phase-2-b-routing-v2",
-    blindBundlePath: agentRoutingV2EvaluationBlindBundlePath,
-    manualScoresPath: agentRoutingV2EvaluationManualScoresPath,
+    evaluationId: "agent-phase-2-d-contract-checklist",
+    blindBundlePath: agentRoutingContractEvaluationBlindBundlePath,
+    manualScoresPath: agentRoutingContractEvaluationManualScoresPath,
     blindSchema: blindRoutingEvaluationBundleSchema,
     scoreSchema: routingManualScoresFileSchema,
     validateScores: (scores, blindBundle) =>

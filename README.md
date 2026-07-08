@@ -345,6 +345,8 @@ npm run agent:routing:contract:evaluate
 `agent:routing:contract:evaluate`はsynthetic baseline/checklist outputsを比較するlocal-only gateで、実生成や外部API呼び出しは行いません。
 また、将来の軽量checklist実験に向けて、明示指定時だけ`contractChecklistText`を生成promptへ渡せるbridgeを用意しています。既定の`/api/generate`やrouting defaultは変更していません。
 
+Phase 2-Dでは、このbridgeを使ったprovider-backed formal evaluationを実行できるようにしています。実行時は通常PowerShellでDocker/Qdrantと`.env.local`を確認してから、`npm run agent:routing:contract:evaluate:run`を実行します。
+
 詳細:
 
 - [AI Agent Phase 2-A adaptive routing design](docs/agent_poc/phase_2_a_adaptive_agent_routing.md)
@@ -352,6 +354,7 @@ npm run agent:routing:contract:evaluate
 - [AI Agent Phase 2-B routing policy refinement](docs/agent_poc/phase_2_b_routing_policy_refinement.md)
 - [AI Agent Phase 2-B routing failure analysis](docs/agent_poc/phase_2_b_routing_failure_analysis.md)
 - [AI Agent Phase 2-C contract-detail routing spike](docs/agent_poc/phase_2_c_contract_detail_routing.md)
+- [AI Agent Phase 2-D contract checklist evaluation](docs/agent_poc/phase_2_d_contract_checklist_evaluation.md)
 - [Context-isolated blind evaluation workflow](docs/agent_poc/context_isolated_blind_evaluation_workflow.md)
 
 ## Tech Stack

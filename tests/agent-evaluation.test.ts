@@ -22,6 +22,7 @@ import {
   buildAgentOffRequest,
   buildAgentOnRequest,
   buildAgentRoutingCandidateDecisionForEvaluation,
+  buildAgentRoutingContractDecisionForEvaluation,
   buildAgentRoutingDecisionForEvaluation,
   buildAgentRoutingEvaluationRunPlan,
   buildAgentRoutedRequest,
@@ -250,8 +251,10 @@ function completeManualScores(sampleIds: string[], onWins = true): ManualScoresF
 
 function completeRoutingManualScores(
   sampleIds: string[],
-  evaluationId: "agent-phase-2-a-routing" | "agent-phase-2-b-routing-v2" =
-    "agent-phase-2-a-routing",
+  evaluationId:
+    | "agent-phase-2-a-routing"
+    | "agent-phase-2-b-routing-v2"
+    | "agent-phase-2-d-contract-checklist" = "agent-phase-2-a-routing",
   scoringMethod:
     | "blind-manual"
     | "context-isolated-blind-llm"
@@ -376,8 +379,12 @@ describe("Agent Phase 1-E evaluation dataset and matrix", () => {
 
 describe("Agent Phase 2-A routing evaluation behavior", () => {
   async function createRoutingStubBundle(input?: {
-    evaluationId?: "agent-phase-2-a-routing" | "agent-phase-2-b-routing-v2";
+    evaluationId?:
+      | "agent-phase-2-a-routing"
+      | "agent-phase-2-b-routing-v2"
+      | "agent-phase-2-d-contract-checklist";
     useCandidateRouting?: boolean;
+    useContractRouting?: boolean;
     failFirstRun?: boolean;
     onRunStart?: Parameters<
       typeof executeAgentRoutingEvaluationRunPlan
@@ -435,11 +442,13 @@ describe("Agent Phase 2-A routing evaluation behavior", () => {
         agent: onAgent(plannedRun.runIndex)
       }),
       executeRouted: async (testCase, plannedRun) => {
-        const routing = input?.useCandidateRouting
-          ? buildAgentRoutingCandidateDecisionForEvaluation(testCase)
-          : buildAgentRoutingDecisionForEvaluation(testCase);
+        const routing = input?.useContractRouting
+          ? buildAgentRoutingContractDecisionForEvaluation(testCase)
+          : input?.useCandidateRouting
+            ? buildAgentRoutingCandidateDecisionForEvaluation(testCase)
+            : buildAgentRoutingDecisionForEvaluation(testCase);
         const routedExecutionMode =
-          input?.useCandidateRouting
+          input?.useCandidateRouting || input?.useContractRouting
             ? routing.mode
             : testCase.caseId === "AGENT-006"
               ? "agent_workflow"
@@ -575,6 +584,92 @@ describe("Agent Phase 2-A routing evaluation behavior", () => {
       summary.routingMetrics.routedExecutionModeCounts.agent_workflow
     ).toBeGreaterThan(0);
     expect(() => assertBlindBundleHasNoModeLeak(blindBundle)).not.toThrow();
+  });
+
+  it("creates Phase 2-D contract checklist routing bundles with v3 metadata", async () => {
+    const rawBundle = await createRoutingStubBundle({
+      evaluationId: "agent-phase-2-d-contract-checklist",
+      useContractRouting: true
+    });
+    const { blindBundle, mappingFile } = createBlindRoutingBundleAndMapping(rawBundle);
+    const manualScores = completeRoutingManualScores(
+      blindBundle.samples.map((sample) => sample.sampleId),
+      "agent-phase-2-d-contract-checklist"
+    );
+    const summary = createRoutingEvaluationSummary({
+      rawBundle,
+      blindBundle,
+      mappingFile,
+      manualScores
+    });
+    const routedRuns = rawBundle.runs.filter((run) => run.mode === "routed");
+
+    expect(rawBundle.evaluationId).toBe("agent-phase-2-d-contract-checklist");
+    expect(blindBundle.evaluationId).toBe("agent-phase-2-d-contract-checklist");
+    expect(mappingFile.evaluationId).toBe("agent-phase-2-d-contract-checklist");
+    expect(summary.evaluationId).toBe("agent-phase-2-d-contract-checklist");
+    expect(
+      routedRuns.every(
+        (run) =>
+          run.routing?.policyVersion === "agent-routing-v3-contract-candidate"
+      )
+    ).toBe(true);
+    expect(
+      routedRuns.some(
+        (run) => run.routing?.signals.lightweightChecklistRecommended === true
+      )
+    ).toBe(true);
+    expect(() => assertBlindBundleHasNoModeLeak(blindBundle)).not.toThrow();
+  });
+
+  it("exports and imports Phase 2-D context-isolated blind packages", async () => {
+    const rawBundle = await createRoutingStubBundle({
+      evaluationId: "agent-phase-2-d-contract-checklist",
+      useContractRouting: true
+    });
+    const { blindBundle } = createBlindRoutingBundleAndMapping(rawBundle);
+    const packageDirectory = await mkdtemp(
+      path.join(os.tmpdir(), "agent-blind-package-")
+    );
+
+    try {
+      const exported = await exportAgentBlindEvaluationPackage({
+        phase: "phase_2_d",
+        outputDirectory: packageDirectory,
+        blindBundle
+      });
+      const scoreFilePath = path.join(
+        packageDirectory,
+        "output",
+        "manual_scores.json"
+      );
+      const manualScores = completeRoutingManualScores(
+        blindBundle.samples.map((sample) => sample.sampleId),
+        "agent-phase-2-d-contract-checklist",
+        "context-isolated-blind-llm"
+      );
+      await writeFile(scoreFilePath, JSON.stringify(manualScores, null, 2), "utf8");
+
+      const imported = await importAgentBlindEvaluationScores({
+        phase: "phase_2_d",
+        scoreFilePath,
+        outputPath: path.join(packageDirectory, "imported_scores.json"),
+        blindBundle
+      });
+
+      expect(exported).toEqual({
+        outputDirectory: packageDirectory,
+        evaluationId: "agent-phase-2-d-contract-checklist",
+        sampleCount: 24
+      });
+      expect(imported).toEqual({
+        outputPath: path.join(packageDirectory, "imported_scores.json"),
+        evaluationId: "agent-phase-2-d-contract-checklist",
+        scoreCount: 24
+      });
+    } finally {
+      await rm(packageDirectory, { recursive: true, force: true });
+    }
   });
 
   it("exports and imports context-isolated blind evaluation packages without mode leaks", async () => {

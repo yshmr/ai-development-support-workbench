@@ -29,9 +29,14 @@ import {
 import {
   agentRoutingDecisionSchema,
   createAgentRoutingCandidateDecision,
+  createAgentRoutingContractCandidateDecision,
   createAgentRoutingDecision,
   type AgentRoutingDecision
 } from "./routing";
+import {
+  createAgentContractChecklist,
+  formatAgentContractChecklistForPrompt
+} from "./contract-checklist";
 import {
   agentPlanSchema,
   agentReviewHistoryEntrySchema,
@@ -137,6 +142,34 @@ export const agentRoutingV2EvaluationManualScoreTemplatePath = path.join(
   agentEvaluationDirectory,
   "phase_2_b_manual_score_template.md"
 );
+export const agentRoutingContractEvaluationRawBundlePath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_d_raw_bundle.json"
+);
+export const agentRoutingContractEvaluationBlindBundlePath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_d_blind_bundle.json"
+);
+export const agentRoutingContractEvaluationSampleMappingPath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_d_sample_mapping.json"
+);
+export const agentRoutingContractEvaluationManualScoresPath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_d_manual_scores.json"
+);
+export const agentRoutingContractEvaluationSummaryPath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_d_summary.json"
+);
+export const agentRoutingContractEvaluationReportPath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_d_report.md"
+);
+export const agentRoutingContractEvaluationManualScoreTemplatePath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_d_manual_score_template.md"
+);
 
 const manualScoreAxisNames = [
   "productSpecificRuleCoverage",
@@ -153,7 +186,8 @@ const routingEvaluationModeSchema = z.enum(["off", "on", "routed"]);
 const routingExecutionModeSchema = z.enum(["single_pass", "agent_workflow"]);
 export const routingEvaluationIdSchema = z.enum([
   "agent-phase-2-a-routing",
-  "agent-phase-2-b-routing-v2"
+  "agent-phase-2-b-routing-v2",
+  "agent-phase-2-d-contract-checklist"
 ]);
 
 export const agentEvaluationCaseSchema = z.object({
@@ -649,6 +683,14 @@ export function buildAgentRoutingCandidateDecisionForEvaluation(
   });
 }
 
+export function buildAgentRoutingContractDecisionForEvaluation(
+  testCase: AgentEvaluationCase
+) {
+  return createAgentRoutingContractCandidateDecision({
+    requirementMemo: testCase.requirementMemo
+  });
+}
+
 export function assertNoEvaluationRubricLeak(request: unknown) {
   const serializedRequest = JSON.stringify(request);
   const forbiddenMarkers = [
@@ -946,8 +988,18 @@ async function executeRoutedSinglePassRun(
       request.inputText,
       "document-diversity-v1"
     );
+    const contractChecklistText =
+      routing.signals.lightweightChecklistRecommended === true
+        ? formatAgentContractChecklistForPrompt(
+            createAgentContractChecklist({
+              requirementMemo: request.inputText,
+              routingDecision: routing
+            })
+          )
+        : undefined;
     const result = await generateFromRequirementMemo(request.inputText, {
-      ragContextText: ragMetadata.contextText
+      ragContextText: ragMetadata.contextText,
+      contractChecklistText
     });
 
     return {
