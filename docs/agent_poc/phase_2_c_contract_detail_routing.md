@@ -123,6 +123,16 @@ npm run agent:routing:contract:checklist
 
 This command is also local-only.
 
+Run the local synthetic checklist comparison:
+
+```bash
+npm run agent:routing:contract:evaluate
+```
+
+This command compares synthetic baseline outputs with synthetic checklist-aware
+outputs for the three low-risk detail-dense cases. It does not run generation,
+call providers, call Embeddings, or call Qdrant.
+
 ## Current Calibration Result
 
 The expected gate is:
@@ -204,6 +214,35 @@ This audit is intentionally conservative:
 
 The audit is useful before a provider-backed experiment because it makes the
 expected checklist behavior testable with synthetic outputs.
+
+## Synthetic Checklist Evaluation
+
+Phase 2-C includes a local-only synthetic evaluation for the three cases where
+`lightweightChecklistRecommended` is expected to be `true`.
+
+| Metric | Baseline synthetic outputs | Checklist-aware synthetic outputs | Delta |
+|---|---:|---:|---:|
+| Covered checklist items | 4 | 13 | +9 |
+| Needs-review checklist items | 9 | 0 | -9 |
+| Improved cases | - | 3 / 3 | - |
+| Regressed cases | - | 0 / 3 | - |
+| Gate passed | - | true | - |
+
+Case-level result:
+
+| Case | Baseline covered | Checklist covered | Delta | Baseline needs review | Checklist needs review | Delta |
+|---|---:|---:|---:|---:|---:|---:|
+| ROUTE-CONTRACT-001 | 1 | 5 | +4 | 4 | 0 | -4 |
+| ROUTE-CONTRACT-002 | 1 | 4 | +3 | 3 | 0 | -3 |
+| ROUTE-CONTRACT-003 | 2 | 4 | +2 | 2 | 0 | -2 |
+
+Interpretation:
+
+- the checklist audit can distinguish weak generic outputs from outputs that
+  preserve query parameter, enum/default state, persistence, and traceability
+  details
+- the result is a local fixture-based gate, not a real LLM quality result
+- provider-backed generation and blind scoring remain separate future work
 
 The next possible step would be a separate lightweight checklist experiment:
 

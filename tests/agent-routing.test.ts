@@ -3,6 +3,11 @@ import {
   auditAgentContractChecklistCoverage,
   createAgentContractChecklist
 } from "@/lib/agent/contract-checklist";
+import {
+  loadContractChecklistEvaluationCases,
+  loadContractChecklistSyntheticOutputPairs,
+  runContractChecklistSyntheticEvaluation
+} from "@/lib/agent/contract-checklist-evaluation";
 import type { GenerationOutput } from "@/lib/schema";
 import {
   analyzeAgentRoutingSignals,
@@ -387,6 +392,26 @@ describe("Agent Phase 2-C contract-detail checklist foundation", () => {
     expect(checklist.reason).toBe(
       "Agent workflow route does not use the lightweight contract checklist."
     );
+  });
+
+  it("evaluates synthetic baseline versus checklist outputs locally", async () => {
+    const cases = await loadContractChecklistEvaluationCases();
+    const outputs = await loadContractChecklistSyntheticOutputPairs();
+    const evaluation = runContractChecklistSyntheticEvaluation({
+      cases,
+      outputs
+    });
+
+    expect(evaluation.summary.totalCases).toBe(3);
+    expect(evaluation.summary.checklistCoveredCount).toBeGreaterThan(
+      evaluation.summary.baselineCoveredCount
+    );
+    expect(evaluation.summary.checklistNeedsReviewCount).toBeLessThan(
+      evaluation.summary.baselineNeedsReviewCount
+    );
+    expect(evaluation.summary.improvedCaseCount).toBe(3);
+    expect(evaluation.summary.regressedCaseCount).toBe(0);
+    expect(evaluation.summary.gatePassed).toBe(true);
   });
 });
 

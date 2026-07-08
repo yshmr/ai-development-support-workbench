@@ -1,0 +1,205 @@
+[
+  {
+    "caseId": "ROUTE-CONTRACT-001",
+    "baselineOutput": {
+      "summary": "検索結果をステータスで絞り込めるようにする。",
+      "spec": [
+        "検索結果画面にステータスフィルターを追加する。",
+        "条件を選ぶと検索結果を更新する。"
+      ],
+      "acceptanceCriteria": [
+        "ステータスを選ぶと結果が絞り込まれる。",
+        "該当結果がない場合はメッセージを表示する。"
+      ],
+      "jiraTasks": [
+        {
+          "title": "ステータスフィルターを追加する",
+          "description": "検索結果画面でステータス条件を選択できるようにする。",
+          "type": "frontend"
+        },
+        {
+          "title": "フィルターテストを追加する",
+          "description": "条件変更時に検索結果が更新されることを確認する。",
+          "type": "test"
+        }
+      ],
+      "implementationPlan": [
+        "検索画面にフィルター状態を追加する。",
+        "条件変更時に検索を再実行する。"
+      ],
+      "reviewPoints": [
+        "ステータス選択時に結果が更新されるか確認する。"
+      ],
+      "risks": [
+        "既存検索条件との組み合わせは確認が必要。"
+      ]
+    },
+    "checklistOutput": {
+      "summary": "検索結果を複数ステータスで絞り込み、URL queryへ保持する。",
+      "spec": [
+        "open、in_progress、resolved、archivedを複数選択できるステータスフィルターを追加する。",
+        "選択値はURL query parameterのstatusへcomma separated valueとして保持する。",
+        "sort未指定時の初期並び順は関連度順とする。"
+      ],
+      "acceptanceCriteria": [
+        "openとresolvedを選択した場合、status queryがopen,resolvedへ更新される。",
+        "URLを再読み込みした場合、status queryから選択状態が復元される。",
+        "sort未指定時は関連度順で表示される。",
+        "検索結果が0件の場合は空状態を表示する。"
+      ],
+      "jiraTasks": [
+        {
+          "title": "status query filterを実装する",
+          "description": "open、in_progress、resolved、archivedの複数選択とcomma separated status queryを実装する。",
+          "type": "frontend"
+        },
+        {
+          "title": "filter contract testsを追加する",
+          "description": "status query serialization、URL復元、関連度順default、0件empty stateを検証する。",
+          "type": "test"
+        }
+      ],
+      "implementationPlan": [
+        "URL queryのparse/serialize helperを追加する。",
+        "status filterの初期値をURL queryから復元する。",
+        "sort未指定時は関連度順を維持する。"
+      ],
+      "reviewPoints": [
+        "status enum values、comma separated value、URL query復元がspecと一致しているか確認する。",
+        "empty stateとdefault sortのテストがあるか確認する。"
+      ],
+      "risks": [
+        "未定義status値の扱いは既存API仕様と合わせる必要がある。"
+      ]
+    }
+  },
+  {
+    "caseId": "ROUTE-CONTRACT-002",
+    "baselineOutput": {
+      "summary": "検索結果を作成日順で並び替えられるようにする。",
+      "spec": [
+        "検索結果に作成日順の並び替えを追加する。",
+        "並び替え条件を選ぶと結果を更新する。"
+      ],
+      "acceptanceCriteria": [
+        "作成日順を選ぶと検索結果が並び替わる。"
+      ],
+      "jiraTasks": [
+        {
+          "title": "並び替え条件を追加する",
+          "description": "検索結果画面に作成日順の選択肢を追加する。",
+          "type": "frontend"
+        }
+      ],
+      "implementationPlan": [
+        "検索UIに並び替え選択を追加する。"
+      ],
+      "reviewPoints": [
+        "並び替え選択時に結果が更新されるか確認する。"
+      ],
+      "risks": [
+        "既存の並び替え条件との整合性確認が必要。"
+      ]
+    },
+    "checklistOutput": {
+      "summary": "既存sort queryにcreated_at_descを追加し、未指定時は関連度順を維持する。",
+      "spec": [
+        "既存のsort query parameterにcreated_at_descを追加する。",
+        "sort未指定時のdefaultは関連度順のままとする。"
+      ],
+      "acceptanceCriteria": [
+        "created_at_desc選択時、sort query parameterがcreated_at_descになる。",
+        "sort query未指定時、検索結果は関連度順で表示される。",
+        "URL再読み込み後、sort queryから選択状態が復元される。"
+      ],
+      "jiraTasks": [
+        {
+          "title": "created_at_desc sort optionを追加する",
+          "description": "既存sort query parameterへcreated_at_descを追加し、URL query復元に対応する。",
+          "type": "frontend"
+        },
+        {
+          "title": "sort query contract testsを追加する",
+          "description": "created_at_desc、default関連度順、URL復元を検証する。",
+          "type": "test"
+        }
+      ],
+      "implementationPlan": [
+        "既存sort query parserへcreated_at_descを追加する。",
+        "sort未指定時は関連度順defaultを維持する。"
+      ],
+      "reviewPoints": [
+        "sort enum value、default sort、URL query復元が仕様通りか確認する。"
+      ],
+      "risks": [
+        "既存sort値との互換性を崩さないようにする。"
+      ]
+    }
+  },
+  {
+    "caseId": "ROUTE-CONTRACT-003",
+    "baselineOutput": {
+      "summary": "設定画面の選択タブを保持できるようにする。",
+      "spec": [
+        "設定画面で選択したタブを保持する。",
+        "ページを開き直しても同じタブを表示する。"
+      ],
+      "acceptanceCriteria": [
+        "タブを選択すると表示内容が切り替わる。",
+        "再表示時に前回のタブが表示される。"
+      ],
+      "jiraTasks": [
+        {
+          "title": "タブ状態を保持する",
+          "description": "設定画面で選択中タブを保存して復元する。",
+          "type": "frontend"
+        }
+      ],
+      "implementationPlan": [
+        "タブ選択状態を画面状態として管理する。"
+      ],
+      "reviewPoints": [
+        "タブ切り替えが動作するか確認する。"
+      ],
+      "risks": [
+        "不正なタブ指定の扱いを確認する。"
+      ]
+    },
+    "checklistOutput": {
+      "summary": "設定画面の選択中タブをURL queryのtabに保持し、reload後も復元する。",
+      "spec": [
+        "選択中タブをURL query parameterのtabへ保持する。",
+        "tab query未指定時はprofileタブを初期表示する。",
+        "ページ再読み込み後もtab queryから同じタブを復元する。"
+      ],
+      "acceptanceCriteria": [
+        "securityタブを選択した場合、tab query parameterがsecurityになる。",
+        "tab query未指定時、profileタブがdefaultで表示される。",
+        "URLを再読み込みした場合、tab queryから選択中タブが復元される。"
+      ],
+      "jiraTasks": [
+        {
+          "title": "tab query persistenceを実装する",
+          "description": "設定画面の選択中タブをURL queryへ保持し、reload後に復元する。",
+          "type": "frontend"
+        },
+        {
+          "title": "tab query testsを追加する",
+          "description": "tab query更新、profile default、URL再読み込み後の復元を検証する。",
+          "type": "test"
+        }
+      ],
+      "implementationPlan": [
+        "tab queryのparse/serialize helperを設定画面に追加する。",
+        "未指定時はprofileタブをdefaultとして扱う。",
+        "reload後にtab queryからタブ状態を復元する。"
+      ],
+      "reviewPoints": [
+        "tab query parameter、profile default、reload復元が受け入れ条件と一致するか確認する。"
+      ],
+      "risks": [
+        "未知のtab query値は安全にprofileへfallbackする必要がある。"
+      ]
+    }
+  }
+]
