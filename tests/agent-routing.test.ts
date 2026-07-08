@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createAgentContractChecklist } from "@/lib/agent/contract-checklist";
 import {
   analyzeAgentRoutingSignals,
   agentRoutingContractCandidatePolicyVersion,
@@ -219,6 +220,69 @@ describe("Agent Phase 2-C contract-detail routing calibration", () => {
     expect(calibration.summary.checklistExpectationPassRate).toBe(1);
     expect(calibration.summary.checklistRecommendedRate).toBe(0.375);
     expect(calibration.summary.gatePassed).toBe(true);
+  });
+});
+
+describe("Agent Phase 2-C contract-detail checklist foundation", () => {
+  it("creates deterministic checklist items for low-risk query contract cases", () => {
+    const requirementMemo =
+      "検索結果をopen、in_progress、resolved、archivedで絞り込みたい。複数ステータスを選べて、URL query parameterのstatusへcomma separated valueとして保持したい。初期並び順は関連度順で、0件のときは空状態を表示したい。";
+    const decision = createAgentRoutingContractCandidateDecision({
+      requirementMemo
+    });
+    const checklist = createAgentContractChecklist({
+      requirementMemo,
+      routingDecision: decision
+    });
+
+    expect(checklist.recommended).toBe(true);
+    expect(checklist.policyVersion).toBe("contract-detail-checklist-v1");
+    expect(checklist.items.map((item) => item.itemId)).toEqual([
+      "CONTRACT-CHECK-001",
+      "CONTRACT-CHECK-002",
+      "CONTRACT-CHECK-003",
+      "CONTRACT-CHECK-004",
+      "CONTRACT-CHECK-005"
+    ]);
+    expect(checklist.items.map((item) => item.category)).toEqual([
+      "query_parameter",
+      "enum_values",
+      "default_state",
+      "persistence",
+      "traceability"
+    ]);
+    expect(JSON.stringify(checklist)).not.toContain("open、in_progress");
+  });
+
+  it("does not create checklist items for copy-only low-risk cases", () => {
+    const requirementMemo = "設定画面の保存ボタンの文言を「保存する」に変更したい。";
+    const checklist = createAgentContractChecklist({ requirementMemo });
+
+    expect(checklist).toEqual({
+      policyVersion: "contract-detail-checklist-v1",
+      recommended: false,
+      reason: "Contract-detail signal is below the lightweight checklist threshold.",
+      items: []
+    });
+  });
+
+  it("does not use lightweight checklist for Agent workflow cases", () => {
+    const requirementMemo =
+      "プロフィール画像を差し替えるとき、保存に成功してから参照先を切り替えたい。失敗時は旧画像を維持し、不完全な一時ファイルを残さないようにしたい。旧画像の削除方針も確認事項として整理したい。";
+    const decision = createAgentRoutingContractCandidateDecision({
+      requirementMemo
+    });
+    const checklist = createAgentContractChecklist({
+      requirementMemo,
+      routingDecision: decision
+    });
+
+    expect(decision.mode).toBe("agent_workflow");
+    expect(checklist.recommended).toBe(false);
+    expect(checklist.items).toEqual([]);
+    expect(checklist.reason).toBe(
+      "Agent workflow route does not use the lightweight contract checklist."
+    );
   });
 });
 

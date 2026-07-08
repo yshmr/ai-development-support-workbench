@@ -115,6 +115,14 @@ npm run agent:routing:contract:calibrate
 
 This command is local-only and does not call providers, Qdrant, or Embeddings.
 
+Inspect the deterministic checklist categories for calibration cases:
+
+```bash
+npm run agent:routing:contract:checklist
+```
+
+This command is also local-only.
+
 ## Current Calibration Result
 
 The expected gate is:
@@ -135,6 +143,43 @@ The gate verifies that:
 
 This is a routing-only design spike. It does not prove that a checklist improves
 generation quality.
+
+## Lightweight Checklist Foundation
+
+Phase 2-C also includes a deterministic checklist foundation:
+
+```text
+contract-detail-checklist-v1
+```
+
+The checklist is created only when:
+
+- `agent-routing-v3-contract-candidate` selects `single_pass`
+- `lightweightChecklistRecommended` is `true`
+
+Checklist categories:
+
+- `query_parameter`
+- `enum_values`
+- `default_state`
+- `persistence`
+- `traceability`
+
+The checklist does not store the raw requirement memo. It emits generic
+instructions such as:
+
+- carry exact query parameter names and value formats into spec and acceptance
+  criteria
+- preserve enum values and multi-select behavior across tasks and tests
+- state default sort, default tab, empty state, or initial display behavior as
+  testable acceptance criteria
+- specify reload, restoration, sharing, or persistence expectations without
+  inventing unsupported synchronization guarantees
+- ensure each contract detail appears in acceptance criteria and at least one
+  Jira task or review point
+
+This foundation is intentionally not wired into `/api/generate`. It exists so
+the checklist can be inspected and tested before any provider-backed experiment.
 
 The next possible step would be a separate lightweight checklist experiment:
 
