@@ -9,6 +9,7 @@ import {
   aggregateRoutingQualityScores,
   assertBlindBundleHasNoModeLeak,
   assertNoEvaluationRubricLeak,
+  assertRoutingEvaluationBundleIsScorable,
   buildAgentEvaluationRunPlan,
   buildAgentOffRequest,
   buildAgentOnRequest,
@@ -365,6 +366,7 @@ describe("Agent Phase 2-A routing evaluation behavior", () => {
   async function createRoutingStubBundle(input?: {
     evaluationId?: "agent-phase-2-a-routing" | "agent-phase-2-b-routing-v2";
     useCandidateRouting?: boolean;
+    failFirstRun?: boolean;
     onRunStart?: Parameters<
       typeof executeAgentRoutingEvaluationRunPlan
     >[0]["onRunStart"];
@@ -380,19 +382,29 @@ describe("Agent Phase 2-A routing evaluation behavior", () => {
       onRunStart: input?.onRunStart,
       onRunComplete: input?.onRunComplete,
       executeOff: async (testCase, plannedRun) => ({
-        request: buildAgentOffRequest(testCase),
-        status: "completed",
-        provider: "openai",
-        modelName: "gpt-5.4-mini",
-        promptVersion: "llm-app-poc-rag-v1",
-        evaluationElapsedMs: 1000 + plannedRun.executionOrder,
-        finalOutput: sampleOutput(`off-${plannedRun.rawRunId}`),
-        rag: ragMetadata(["profile-image-spec", "profile-api"]),
-        usage: {
-          inputTokens: 100,
-          outputTokens: 200,
-          totalTokens: 300
-        }
+        ...(input?.failFirstRun && plannedRun.executionOrder === 1
+          ? {
+              request: buildAgentOffRequest(testCase),
+              status: "failed" as const,
+              promptVersion: "llm-app-poc-rag-v1",
+              evaluationElapsedMs: 1000 + plannedRun.executionOrder,
+              error: { message: "stubbed failure" }
+            }
+          : {
+              request: buildAgentOffRequest(testCase),
+              status: "completed" as const,
+              provider: "openai",
+              modelName: "gpt-5.4-mini",
+              promptVersion: "llm-app-poc-rag-v1",
+              evaluationElapsedMs: 1000 + plannedRun.executionOrder,
+              finalOutput: sampleOutput(`off-${plannedRun.rawRunId}`),
+              rag: ragMetadata(["profile-image-spec", "profile-api"]),
+              usage: {
+                inputTokens: 100,
+                outputTokens: 200,
+                totalTokens: 300
+              }
+            })
       }),
       executeOn: async (testCase, plannedRun) => ({
         request: buildAgentOnRequest(testCase),
@@ -511,6 +523,7 @@ describe("Agent Phase 2-A routing evaluation behavior", () => {
     expect(latencyAndUsage.routedVsAlwaysOnElapsedRatio).toBeLessThan(1);
     expect(latencyAndUsage.routedVsAlwaysOnTokenRatio).toBeLessThan(1);
     expect(summary.evaluationId).toBe("agent-phase-2-a-routing");
+    expect(() => assertRoutingEvaluationBundleIsScorable(rawBundle)).not.toThrow();
   });
 
   it("creates isolated Phase 2-B routing v2 bundles with candidate routing metadata", async () => {
@@ -548,6 +561,14 @@ describe("Agent Phase 2-A routing evaluation behavior", () => {
       summary.routingMetrics.routedExecutionModeCounts.agent_workflow
     ).toBeGreaterThan(0);
     expect(() => assertBlindBundleHasNoModeLeak(blindBundle)).not.toThrow();
+  });
+
+  it("rejects routing evaluation bundles with failed runs before blind scoring", async () => {
+    const rawBundle = await createRoutingStubBundle({ failFirstRun: true });
+
+    expect(() => assertRoutingEvaluationBundleIsScorable(rawBundle)).toThrow(
+      "Routing evaluation is not scorable"
+    );
   });
 });
 

@@ -661,6 +661,19 @@ export function assertNoEvaluationRubricLeak(request: unknown) {
   }
 }
 
+export function assertRoutingEvaluationBundleIsScorable(
+  rawBundle: RawRoutingEvaluationBundle
+) {
+  const failedRuns = rawBundle.runs.filter((run) => run.status === "failed");
+  const missingOutputRuns = rawBundle.runs.filter((run) => !run.finalOutput);
+
+  if (failedRuns.length > 0 || missingOutputRuns.length > 0) {
+    throw new Error(
+      `Routing evaluation is not scorable: failedRuns=${failedRuns.length}, missingFinalOutputRuns=${missingOutputRuns.length}. Raw bundle was written for diagnostics; rerun after fixing the execution environment.`
+    );
+  }
+}
+
 function buildRawRun(input: {
   plannedRun: PlannedEvaluationRun;
   testCase: AgentEvaluationCase;

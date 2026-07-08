@@ -5,6 +5,7 @@ import {
   agentRoutingV2EvaluationRawBundlePath,
   agentRoutingV2EvaluationSampleMappingPath,
   assertBlindBundleHasNoModeLeak,
+  assertRoutingEvaluationBundleIsScorable,
   buildAgentRoutingCandidateDecisionForEvaluation,
   createBlindRoutingBundleAndMapping,
   executeAgentRoutingEvaluationRunPlan,
@@ -38,11 +39,14 @@ async function main() {
       );
     }
   });
+
+  await writeJsonFile(agentRoutingV2EvaluationRawBundlePath, rawBundle);
+  assertRoutingEvaluationBundleIsScorable(rawBundle);
+
   const { blindBundle, mappingFile } =
     createBlindRoutingBundleAndMapping(rawBundle);
   assertBlindBundleHasNoModeLeak(blindBundle);
 
-  await writeJsonFile(agentRoutingV2EvaluationRawBundlePath, rawBundle);
   await writeJsonFile(agentRoutingV2EvaluationBlindBundlePath, blindBundle);
   await writeJsonFile(agentRoutingV2EvaluationSampleMappingPath, mappingFile);
   await writeTextFile(
