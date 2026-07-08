@@ -27,6 +27,7 @@ import {
 } from "./orchestrator";
 import {
   agentRoutingDecisionSchema,
+  createAgentRoutingCandidateDecision,
   createAgentRoutingDecision,
   type AgentRoutingDecision
 } from "./routing";
@@ -107,6 +108,34 @@ export const agentRoutingEvaluationManualScoreTemplatePath = path.join(
   agentEvaluationDirectory,
   "phase_2_a_manual_score_template.md"
 );
+export const agentRoutingV2EvaluationRawBundlePath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_b_raw_bundle.json"
+);
+export const agentRoutingV2EvaluationBlindBundlePath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_b_blind_bundle.json"
+);
+export const agentRoutingV2EvaluationSampleMappingPath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_b_sample_mapping.json"
+);
+export const agentRoutingV2EvaluationManualScoresPath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_b_manual_scores.json"
+);
+export const agentRoutingV2EvaluationSummaryPath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_b_summary.json"
+);
+export const agentRoutingV2EvaluationReportPath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_b_report.md"
+);
+export const agentRoutingV2EvaluationManualScoreTemplatePath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_b_manual_score_template.md"
+);
 
 const manualScoreAxisNames = [
   "productSpecificRuleCoverage",
@@ -121,6 +150,10 @@ const manualScoreAxisNames = [
 const evaluationModeSchema = z.enum(["off", "on"]);
 const routingEvaluationModeSchema = z.enum(["off", "on", "routed"]);
 const routingExecutionModeSchema = z.enum(["single_pass", "agent_workflow"]);
+export const routingEvaluationIdSchema = z.enum([
+  "agent-phase-2-a-routing",
+  "agent-phase-2-b-routing-v2"
+]);
 
 export const agentEvaluationCaseSchema = z.object({
   caseId: z.string().regex(/^AGENT-\d{3}$/),
@@ -288,7 +321,7 @@ export const rawRoutingEvaluationRunSchema = rawEvaluationRunSchema.extend({
 });
 
 export const rawRoutingEvaluationBundleSchema = z.object({
-  evaluationId: z.literal("agent-phase-2-a-routing"),
+  evaluationId: routingEvaluationIdSchema,
   createdAt: z.string().datetime(),
   runMatrix: z.object({
     totalRuns: z.literal(24),
@@ -305,16 +338,16 @@ export const routingSampleMappingEntrySchema = sampleMappingEntrySchema.extend({
 });
 
 export const routingSampleMappingFileSchema = sampleMappingFileSchema.extend({
-  evaluationId: z.literal("agent-phase-2-a-routing"),
+  evaluationId: routingEvaluationIdSchema,
   mappings: z.array(routingSampleMappingEntrySchema)
 });
 
 export const blindRoutingEvaluationBundleSchema = blindEvaluationBundleSchema.extend({
-  evaluationId: z.literal("agent-phase-2-a-routing")
+  evaluationId: routingEvaluationIdSchema
 });
 
 export const routingManualScoresFileSchema = manualScoresFileSchema.extend({
-  evaluationId: z.literal("agent-phase-2-a-routing")
+  evaluationId: routingEvaluationIdSchema
 });
 
 export type AgentEvaluationCase = z.infer<typeof agentEvaluationCaseSchema>;
@@ -327,6 +360,7 @@ export type ManualScoresFile = z.infer<typeof manualScoresFileSchema>;
 export type ManualQualityScore = z.infer<typeof manualQualityScoreSchema>;
 export type RoutingEvaluationMode = z.infer<typeof routingEvaluationModeSchema>;
 export type RoutingExecutionMode = z.infer<typeof routingExecutionModeSchema>;
+export type RoutingEvaluationId = z.infer<typeof routingEvaluationIdSchema>;
 export type PlannedRoutingEvaluationRun = z.infer<
   typeof plannedRoutingEvaluationRunSchema
 >;
@@ -599,6 +633,14 @@ export function buildAgentRoutingDecisionForEvaluation(
   });
 }
 
+export function buildAgentRoutingCandidateDecisionForEvaluation(
+  testCase: AgentEvaluationCase
+) {
+  return createAgentRoutingCandidateDecision({
+    requirementMemo: testCase.requirementMemo
+  });
+}
+
 export function assertNoEvaluationRubricLeak(request: unknown) {
   const serializedRequest = JSON.stringify(request);
   const forbiddenMarkers = [
@@ -697,9 +739,11 @@ export async function executeAgentEvaluationRunPlan(input: {
 
 export async function executeAgentRoutingEvaluationRunPlan(input: {
   cases: AgentEvaluationCase[];
+  evaluationId?: RoutingEvaluationId;
   executeOff?: ExecuteRoutingEvaluationRun;
   executeOn?: ExecuteRoutingEvaluationRun;
   executeRouted?: ExecuteRoutingEvaluationRun;
+  createRoutingDecision?: (testCase: AgentEvaluationCase) => AgentRoutingDecision;
   createdAt?: string;
   onRunStart?: (input: {
     plannedRun: PlannedRoutingEvaluationRun;
@@ -717,7 +761,10 @@ export async function executeAgentRoutingEvaluationRunPlan(input: {
   const runs: RawRoutingEvaluationRun[] = [];
   const executeOff = input.executeOff ?? executeAgentOffRun;
   const executeOn = input.executeOn ?? executeAgentOnRun;
-  const executeRouted = input.executeRouted ?? executeAgentRoutedRun;
+  const executeRouted =
+    input.executeRouted ??
+    ((testCase) =>
+      executeAgentRoutedRun(testCase, input.createRoutingDecision));
 
   for (const plannedRun of plannedRuns) {
     const testCase = caseById.get(plannedRun.caseId);
@@ -744,7 +791,7 @@ export async function executeAgentRoutingEvaluationRunPlan(input: {
   }
 
   return rawRoutingEvaluationBundleSchema.parse({
-    evaluationId: "agent-phase-2-a-routing",
+    evaluationId: input.evaluationId ?? "agent-phase-2-a-routing",
     createdAt: input.createdAt ?? new Date().toISOString(),
     runMatrix: {
       totalRuns: 24,
@@ -852,10 +899,11 @@ async function executeAgentOnRun(
 }
 
 async function executeAgentRoutedRun(
-  testCase: AgentEvaluationCase
+  testCase: AgentEvaluationCase,
+  createRoutingDecision = buildAgentRoutingDecisionForEvaluation
 ): Promise<ExecuteRoutingRunResult> {
   const request = buildAgentRoutedRequest(testCase);
-  const routing = buildAgentRoutingDecisionForEvaluation(testCase);
+  const routing = createRoutingDecision(testCase);
   assertNoEvaluationRubricLeak(request);
 
   if (routing.mode === "single_pass") {
@@ -1144,10 +1192,10 @@ export function createBlindRoutingBundleAndMapping(
   const completedRuns = rawBundle.runs.filter((run) => run.finalOutput);
   const orderedRuns = [...completedRuns].sort((a, b) => {
     const hashA = stableHash(
-      `agent-phase-2-a-routing-blind-v1:${a.rawRunId}:${a.caseId}:${a.mode}`
+      `${rawBundle.evaluationId}-blind-v1:${a.rawRunId}:${a.caseId}:${a.mode}`
     );
     const hashB = stableHash(
-      `agent-phase-2-a-routing-blind-v1:${b.rawRunId}:${b.caseId}:${b.mode}`
+      `${rawBundle.evaluationId}-blind-v1:${b.rawRunId}:${b.caseId}:${b.mode}`
     );
     return hashA.localeCompare(hashB);
   });
@@ -1185,13 +1233,13 @@ export function createBlindRoutingBundleAndMapping(
 
   return {
     blindBundle: blindRoutingEvaluationBundleSchema.parse({
-      evaluationId: "agent-phase-2-a-routing",
+      evaluationId: rawBundle.evaluationId,
       createdAt,
       scoringMethod: "blind-manual",
       samples
     }),
     mappingFile: routingSampleMappingFileSchema.parse({
-      evaluationId: "agent-phase-2-a-routing",
+      evaluationId: rawBundle.evaluationId,
       createdAt,
       mappings
     })
@@ -1972,7 +2020,7 @@ export function createRoutingEvaluationSummary(input: {
   });
 
   return {
-    evaluationId: "agent-phase-2-a-routing",
+    evaluationId: input.rawBundle.evaluationId,
     createdAt: new Date().toISOString(),
     scoringMethod: "blind-manual",
     runMatrix: input.rawBundle.runMatrix,
@@ -2019,7 +2067,7 @@ export function createRoutingEvaluationReportMarkdown(
   summary: ReturnType<typeof createRoutingEvaluationSummary>
 ) {
   return [
-    "# Agent PoC Phase 2-A Routing Evaluation Report",
+    `# Agent PoC Routing Evaluation Report (${summary.evaluationId})`,
     "",
     "This report was generated from the routing raw evaluation bundle, blind sample mapping, and blind manual scores.",
     "",
@@ -2048,7 +2096,7 @@ export function createRoutingEvaluationReportMarkdown(
     "",
     "## Scope Note",
     "",
-    "These results apply only to the Phase 2-A routing dataset, current prompt/schema, current local environment, and manually scored blind samples."
+    "These results apply only to the selected routing dataset, current prompt/schema, current local environment, and manually scored blind samples."
   ].join("\n");
 }
 

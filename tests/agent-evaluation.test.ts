@@ -12,6 +12,7 @@ import {
   buildAgentEvaluationRunPlan,
   buildAgentOffRequest,
   buildAgentOnRequest,
+  buildAgentRoutingCandidateDecisionForEvaluation,
   buildAgentRoutingDecisionForEvaluation,
   buildAgentRoutingEvaluationRunPlan,
   buildAgentRoutedRequest,
@@ -239,10 +240,12 @@ function completeManualScores(sampleIds: string[], onWins = true): ManualScoresF
 }
 
 function completeRoutingManualScores(
-  sampleIds: string[]
+  sampleIds: string[],
+  evaluationId: "agent-phase-2-a-routing" | "agent-phase-2-b-routing-v2" =
+    "agent-phase-2-a-routing"
 ): RoutingManualScoresFile {
   return routingManualScoresFileSchema.parse({
-    evaluationId: "agent-phase-2-a-routing",
+    evaluationId,
     scoringMethod: "blind-manual",
     scores: sampleIds.map((sampleId, index) => ({
       sampleId,
@@ -360,6 +363,8 @@ describe("Agent Phase 1-E evaluation dataset and matrix", () => {
 
 describe("Agent Phase 2-A routing evaluation behavior", () => {
   async function createRoutingStubBundle(input?: {
+    evaluationId?: "agent-phase-2-a-routing" | "agent-phase-2-b-routing-v2";
+    useCandidateRouting?: boolean;
     onRunStart?: Parameters<
       typeof executeAgentRoutingEvaluationRunPlan
     >[0]["onRunStart"];
@@ -370,6 +375,7 @@ describe("Agent Phase 2-A routing evaluation behavior", () => {
     const cases = await loadAgentEvaluationCases();
     return executeAgentRoutingEvaluationRunPlan({
       cases,
+      evaluationId: input?.evaluationId,
       createdAt: fixedCreatedAt,
       onRunStart: input?.onRunStart,
       onRunComplete: input?.onRunComplete,
@@ -405,9 +411,15 @@ describe("Agent Phase 2-A routing evaluation behavior", () => {
         agent: onAgent(plannedRun.runIndex)
       }),
       executeRouted: async (testCase, plannedRun) => {
-        const routing = buildAgentRoutingDecisionForEvaluation(testCase);
+        const routing = input?.useCandidateRouting
+          ? buildAgentRoutingCandidateDecisionForEvaluation(testCase)
+          : buildAgentRoutingDecisionForEvaluation(testCase);
         const routedExecutionMode =
-          testCase.caseId === "AGENT-006" ? "agent_workflow" : "single_pass";
+          input?.useCandidateRouting
+            ? routing.mode
+            : testCase.caseId === "AGENT-006"
+              ? "agent_workflow"
+              : "single_pass";
 
         return {
           request: buildAgentRoutedRequest(testCase),
@@ -499,6 +511,43 @@ describe("Agent Phase 2-A routing evaluation behavior", () => {
     expect(latencyAndUsage.routedVsAlwaysOnElapsedRatio).toBeLessThan(1);
     expect(latencyAndUsage.routedVsAlwaysOnTokenRatio).toBeLessThan(1);
     expect(summary.evaluationId).toBe("agent-phase-2-a-routing");
+  });
+
+  it("creates isolated Phase 2-B routing v2 bundles with candidate routing metadata", async () => {
+    const rawBundle = await createRoutingStubBundle({
+      evaluationId: "agent-phase-2-b-routing-v2",
+      useCandidateRouting: true
+    });
+    const { blindBundle, mappingFile } = createBlindRoutingBundleAndMapping(rawBundle);
+    const manualScores = completeRoutingManualScores(
+      blindBundle.samples.map((sample) => sample.sampleId),
+      "agent-phase-2-b-routing-v2"
+    );
+    const summary = createRoutingEvaluationSummary({
+      rawBundle,
+      blindBundle,
+      mappingFile,
+      manualScores
+    });
+    const routedRuns = rawBundle.runs.filter((run) => run.mode === "routed");
+
+    expect(rawBundle.evaluationId).toBe("agent-phase-2-b-routing-v2");
+    expect(blindBundle.evaluationId).toBe("agent-phase-2-b-routing-v2");
+    expect(mappingFile.evaluationId).toBe("agent-phase-2-b-routing-v2");
+    expect(summary.evaluationId).toBe("agent-phase-2-b-routing-v2");
+    expect(routedRuns).toHaveLength(8);
+    expect(
+      routedRuns.every(
+        (run) => run.routing?.policyVersion === "agent-routing-v2-candidate"
+      )
+    ).toBe(true);
+    expect(summary.routingMetrics.routedExecutionModeCounts.single_pass).toBeGreaterThan(
+      0
+    );
+    expect(
+      summary.routingMetrics.routedExecutionModeCounts.agent_workflow
+    ).toBeGreaterThan(0);
+    expect(() => assertBlindBundleHasNoModeLeak(blindBundle)).not.toThrow();
   });
 });
 

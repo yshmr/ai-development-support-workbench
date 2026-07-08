@@ -220,6 +220,18 @@ npm run agent:routing:calibrate
 The command reads public-safe calibration cases and evaluates only deterministic
 routing decisions. It does not call a provider, Qdrant, or Embeddings API.
 
+Implemented dry-run result:
+
+| Metric | Value |
+|---|---:|
+| totalCases | 8 |
+| passRate | 1.000 |
+| singlePassRate | 0.500 |
+| agentWorkflowRate | 0.500 |
+| lowRiskAvoidanceRate | 1.000 |
+| highRiskRouteRate | 1.000 |
+| gatePassed | true |
+
 ## Evaluation Plan
 
 Only after the dry-run gate passes:
@@ -230,6 +242,30 @@ Only after the dry-run gate passes:
 4. Use blind manual scoring.
 5. Summarize quality, latency, token usage, and routing metrics.
 6. Preserve negative or partial results.
+
+Phase 2-B formal evaluation commands are prepared separately from Phase 2-A:
+
+```bash
+npm run agent:routing:v2:evaluate:run
+npm run agent:routing:v2:evaluate:summarize
+```
+
+`agent:routing:v2:evaluate:run` executes real provider-backed generation,
+Agent workflow, RAG retrieval, and embedding calls. It should only be run from a
+normal local PowerShell after manual confirmation. Codex sandbox execution must
+not be treated as a valid real-environment result.
+
+Phase 2-B formal output paths:
+
+| Artifact | Path |
+|---|---|
+| Raw bundle | `data/agent/evaluation/phase_2_b_raw_bundle.json` |
+| Blind bundle | `data/agent/evaluation/phase_2_b_blind_bundle.json` |
+| Sample mapping | `data/agent/evaluation/phase_2_b_sample_mapping.json` |
+| Manual score template | `data/agent/evaluation/phase_2_b_manual_score_template.md` |
+| Manual scores | `data/agent/evaluation/phase_2_b_manual_scores.json` |
+| Summary | `data/agent/evaluation/phase_2_b_summary.json` |
+| Report | `data/agent/evaluation/phase_2_b_report.md` |
 
 Compare:
 
