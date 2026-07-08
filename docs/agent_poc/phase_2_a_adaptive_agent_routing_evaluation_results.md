@@ -184,3 +184,7 @@ Future work may evaluate:
 - calibrated policy that must choose `single_pass` for at least some low-risk cases before formal scoring
 
 These are future candidates and were not implemented in Phase 2-A.
+
+Detailed follow-up design:
+
+- [Phase 2-B routing policy refinement hypothesis](phase_2_b_routing_policy_refinement.md)
