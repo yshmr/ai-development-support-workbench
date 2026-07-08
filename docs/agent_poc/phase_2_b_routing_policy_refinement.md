@@ -493,6 +493,9 @@ Recommended next hypotheses:
 - separately analyze cases where routed v2 chose `single_pass` but lost to OFF
 - keep `agent-routing-v1` only as a documented negative baseline
 
+The routed failure analysis is recorded separately in
+[Phase 2-B routing failure analysis](phase_2_b_routing_failure_analysis.md).
+
 Compare:
 
 - Always OFF
@@ -541,16 +544,20 @@ Phase 2-B design does not propose:
 The next implementation step, if pursued, should be:
 
 ```text
-Phase 2-B dry-run routing calibration
+Phase 2-C low-risk contract-detail routing design spike
 ```
 
 It should add:
 
-- expanded public-safe evaluation cases
-- deterministic `agent-routing-v2` candidate policy
-- routing-only simulation script or test
+- deterministic signals for query parameters, enum values, default sort,
+  empty states, persistence, and representation formats
+- a routing-only or checklist-only calibration path
+- public-safe low-risk but detail-dense evaluation cases
 - no external LLM calls
 - no Qdrant calls
 - no Embeddings calls
+- no default `/api/generate` behavior change
 
-Only after routing-only simulation demonstrates a meaningful mix of `single_pass` and `agent_workflow` should real formal evaluation be considered.
+Only after a local calibration gate demonstrates that the new signals catch
+contract-detail misses without collapsing back into Always Agent Workflow should
+another real formal evaluation be considered.
