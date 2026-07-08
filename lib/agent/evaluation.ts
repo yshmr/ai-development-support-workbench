@@ -9,6 +9,7 @@ import {
 import {
   type RagContextPolicy,
   type RagMetadata,
+  generationOutputJsonSchema,
   generationOutputSchema,
   ragMetadataSchema,
   type GenerationOutput
@@ -282,6 +283,7 @@ export const blindEvaluationBundleSchema = z.object({
   evaluationId: z.literal("agent-phase-1-e"),
   createdAt: z.string().datetime(),
   scoringMethod: z.literal("blind-manual"),
+  generationOutputSchema: z.record(z.unknown()).optional(),
   samples: z.array(blindEvaluationSampleSchema)
 });
 
@@ -1183,6 +1185,7 @@ export function createBlindBundleAndMapping(
       evaluationId: "agent-phase-1-e",
       createdAt,
       scoringMethod: "blind-manual",
+      generationOutputSchema: generationOutputJsonSchema,
       samples
     }),
     mappingFile: sampleMappingFileSchema.parse({
@@ -1249,6 +1252,7 @@ export function createBlindRoutingBundleAndMapping(
       evaluationId: rawBundle.evaluationId,
       createdAt,
       scoringMethod: "blind-manual",
+      generationOutputSchema: generationOutputJsonSchema,
       samples
     }),
     mappingFile: routingSampleMappingFileSchema.parse({
@@ -1287,12 +1291,25 @@ export function assertBlindBundleHasNoModeLeak(blindBundle: unknown) {
 }
 
 export function createManualScoreTemplate(blindBundle: {
+  generationOutputSchema?: unknown;
   samples: Array<{ sampleId: string }>;
 }): string {
   return [
     "# Phase 1-E Blind Manual Score Template",
     "",
     "Score each axis as an integer from 1 to 5. Do not add mode guesses.",
+    "",
+    "## GenerationOutput Schema",
+    "",
+    "Use this schema only to score jsonStructureStability. Do not infer routing mode, Agent metadata, provider, latency, or sample mapping from it.",
+    "",
+    "```json",
+    JSON.stringify(
+      blindBundle.generationOutputSchema ?? generationOutputJsonSchema,
+      null,
+      2
+    ),
+    "```",
     "",
     ...blindBundle.samples.flatMap((sample) => [
       `## ${sample.sampleId}`,

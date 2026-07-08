@@ -267,6 +267,32 @@ Phase 2-B formal output paths:
 | Summary | `data/agent/evaluation/phase_2_b_summary.json` |
 | Report | `data/agent/evaluation/phase_2_b_report.md` |
 
+## Blind Scoring Schema Note
+
+Phase 2-B initial blind manual scoring used `phase_2_b_blind_bundle.json`,
+which included each sample's `finalOutput` but did not include the actual
+`GenerationOutput` JSON schema definition.
+
+The `jsonStructureStability` axis was therefore evaluated by visible structure:
+
+- required common fields were present:
+  `summary`, `spec`, `acceptanceCriteria`, `jiraTasks`,
+  `implementationPlan`, `reviewPoints`, `risks`
+- array / string / object structure was stable across samples
+- `jiraTasks` had stable `title`, `description`, and `type` fields
+- no empty field or obvious structural breakage was observed
+
+This does not invalidate the Phase 2-B scoring, because the other six axes were
+fully assessable from `requirementMemo`, `expectations`, and `finalOutput`.
+However, the `jsonStructureStability` score should be treated as lower
+confidence than the other six axes unless the evaluator is also given the actual
+schema.
+
+For future blind scoring, the blind bundle and manual scoring template include
+the routing-free `GenerationOutput` schema. This preserves blindness because it
+does not include raw bundle data, sample mapping, routing mode, Agent metadata,
+review history, provider, latency, or token usage.
+
 Compare:
 
 - Always OFF

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { generationOutputJsonSchema } from "@/lib/schema";
 import {
   aggregateAgentMetrics,
   aggregateLatencyAndUsage,
@@ -510,6 +511,7 @@ describe("Agent Phase 2-A routing evaluation behavior", () => {
     expect(completedRunIds[23]).toBe("ROUTE-RUN-024");
     expect(rawBundle.runs.filter((run) => run.mode === "routed")).toHaveLength(8);
     expect(blindBundle.samples).toHaveLength(24);
+    expect(blindBundle.generationOutputSchema).toEqual(generationOutputJsonSchema);
     expect(mappingFile.mappings).toHaveLength(24);
     expect(() => assertBlindBundleHasNoModeLeak(blindBundle)).not.toThrow();
     expect(validateRoutingManualScores(manualScores, blindBundle)).toEqual(
@@ -546,6 +548,7 @@ describe("Agent Phase 2-A routing evaluation behavior", () => {
 
     expect(rawBundle.evaluationId).toBe("agent-phase-2-b-routing-v2");
     expect(blindBundle.evaluationId).toBe("agent-phase-2-b-routing-v2");
+    expect(blindBundle.generationOutputSchema).toEqual(generationOutputJsonSchema);
     expect(mappingFile.evaluationId).toBe("agent-phase-2-b-routing-v2");
     expect(summary.evaluationId).toBe("agent-phase-2-b-routing-v2");
     expect(routedRuns).toHaveLength(8);
@@ -635,6 +638,9 @@ describe("Agent Phase 1-E raw and blind bundle behavior", () => {
 
     expect(first.blindBundle.samples).toHaveLength(16);
     expect(first.mappingFile.mappings).toHaveLength(16);
+    expect(first.blindBundle.generationOutputSchema).toEqual(
+      generationOutputJsonSchema
+    );
     expect(first.blindBundle.samples.map((sample) => sample.sampleId)).toEqual(
       Array.from({ length: 16 }, (_, index) => `SAMPLE-${String(index + 1).padStart(3, "0")}`)
     );
@@ -645,6 +651,9 @@ describe("Agent Phase 1-E raw and blind bundle behavior", () => {
     expect(JSON.stringify(first.blindBundle)).not.toContain("agentMode");
     expect(JSON.stringify(first.blindBundle)).not.toContain("reviewHistory");
     expect(createManualScoreTemplate(first.blindBundle)).toContain("SAMPLE-001");
+    expect(createManualScoreTemplate(first.blindBundle)).toContain(
+      "GenerationOutput Schema"
+    );
   });
 
   it("validates manual score files and rejects duplicate, missing, unknown, and out-of-range samples", async () => {
