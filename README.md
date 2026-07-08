@@ -330,6 +330,8 @@ Phase 2-B formal evaluationでは、Routed v2が`single_pass` 4件、`agent_work
 
 Routed v2はAlways ONより低costでしたが、Always OFFのqualityを上回らなかったため、default policyにはしません。Phase 2-Bはcost-aware routing candidateとしての前進と、追加評価課題を示すpartial resultとして扱います。
 
+Phase 2-Bでは、ChatGPTを必須dependencyにしないためのcontext-isolated blind evaluator workflowも検証しました。別workspaceにblind bundle、`GenerationOutput` schema、rubric、output schemaのみをexportし、score JSONをimportして既存集計へ流す運用です。secondary scoring checkでも、Routed v2はAlways ONよりcostを抑える一方、Always OFFのqualityを上回らないという実務判断は変わりませんでした。
+
 詳細:
 
 - [AI Agent Phase 2-A adaptive routing design](docs/agent_poc/phase_2_a_adaptive_agent_routing.md)

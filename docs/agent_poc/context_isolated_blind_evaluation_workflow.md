@@ -182,3 +182,29 @@ validation only. It does not call:
 
 Score values are accepted only through schema validation and sample-id coverage
 checks. Aggregation remains a separate step.
+
+## Phase 2-B Workflow Validation
+
+The workflow was validated against the Phase 2-B routing v2 formal blind bundle.
+
+Setup:
+
+- Builder workspace: `ai_development_support_workbench`
+- Blind evaluator workspace: `ai_evaluation_blind_workspace`
+- Phase: `phase_2_b`
+- Evaluation ID: `agent-phase-2-b-routing-v2`
+- Sample count: 24
+- Scoring method: `context-isolated-blind-llm`
+
+Observed result:
+
+- the blind package was exported to the separate workspace
+- the evaluator used only permitted blind package files
+- `output/manual_scores.json` was created
+- score import validation succeeded with 24 samples
+- phase-specific summarization succeeded
+- no OpenAI, Embeddings, Qdrant, or provider API call was made by export/import
+
+The secondary scoring check did not change the Phase 2-B adoption decision:
+Routed v2 remained lower quality than Always OFF while reducing cost relative to
+Always ON, so it remains experimental rather than default.

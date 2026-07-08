@@ -308,6 +308,59 @@ the routing-free `GenerationOutput` schema. This preserves blindness because it
 does not include raw bundle data, sample mapping, routing mode, Agent metadata,
 review history, provider, latency, or token usage.
 
+## Context-Isolated Blind Evaluator Check
+
+After introducing the reusable blind evaluation package workflow, Phase 2-B was
+also scored by a separate context-isolated Codex evaluator session using only:
+
+- `input/blind_bundle.json`
+- `input/generation_output_schema.json`
+- `input/output_schema.json`
+- `input/scoring_rubric.md`
+- `scoring_prompt.md`
+
+The evaluator reported:
+
+- `output/manual_scores.json` was created.
+- 24 samples were scored.
+- The score JSON followed `input/output_schema.json`.
+- No unscorable or ambiguous sample was reported.
+- Only the permitted files in the blind workspace were used.
+
+This run used `scoringMethod: context-isolated-blind-llm`. It is not an external
+independent evaluator result, because it still uses the Codex/model family. It is
+recorded as a workflow validation and secondary scoring check for the
+context-isolated evaluation architecture.
+
+Context-isolated scoring aggregate:
+
+| Metric | Always OFF | Always ON | Routed v2 |
+|---|---:|---:|---:|
+| Seven-axis mean | 4.768 | 4.696 | 4.661 |
+| Seven-axis median | 4.857 | 4.714 | 4.857 |
+
+Paired result:
+
+| Comparison | Routed wins | Ties | Routed losses |
+|---|---:|---:|---:|
+| Routed v2 vs Always OFF | 0 | 3 | 5 |
+| Routed v2 vs Always ON | 2 | 2 | 4 |
+
+The cost and routing metrics are unchanged because they come from the same raw
+formal evaluation bundle:
+
+| Metric | Value |
+|---|---:|
+| agentInvocationRate | 0.500 |
+| avoidedAgentRate | 0.500 |
+| Routed v2 / Always ON elapsed ratio | 0.894 |
+| Routed v2 / Always ON token ratio | 0.691 |
+
+This secondary check reaches the same practical decision as the original manual
+scoring: Routed v2 avoids Agent workflow for half of routed runs and reduces
+cost relative to Always ON, but it does not beat Always OFF on quality. Therefore
+Routed v2 remains experimental and should not become the default policy.
+
 ## Formal Evaluation Result
 
 Conclusion Category: **B. Partial routing improvement with quality trade-off**
