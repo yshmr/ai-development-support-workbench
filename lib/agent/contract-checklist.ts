@@ -237,6 +237,29 @@ export function createAgentContractChecklist({
   });
 }
 
+export function formatAgentContractChecklistForPrompt(
+  checklist: ContractChecklist
+): string | undefined {
+  const parsedChecklist = contractChecklistSchema.parse(checklist);
+
+  if (!parsedChecklist.recommended || parsedChecklist.items.length === 0) {
+    return undefined;
+  }
+
+  return [
+    "Contract-detail checklist is deterministic reference guidance, not additional product facts.",
+    `policyVersion: ${parsedChecklist.policyVersion}`,
+    ...parsedChecklist.items.map((item) =>
+      [
+        `- ${item.itemId}`,
+        `  category: ${item.category}`,
+        `  instruction: ${item.instruction}`,
+        `  targetFields: ${item.targetFields.join(",")}`
+      ].join("\n")
+    )
+  ].join("\n");
+}
+
 function outputFieldText(
   output: GenerationOutput,
   field: z.infer<typeof contractChecklistTargetFieldSchema>

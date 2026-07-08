@@ -343,6 +343,7 @@ npm run agent:routing:contract:evaluate
 ```
 
 `agent:routing:contract:evaluate`はsynthetic baseline/checklist outputsを比較するlocal-only gateで、実生成や外部API呼び出しは行いません。
+また、将来の軽量checklist実験に向けて、明示指定時だけ`contractChecklistText`を生成promptへ渡せるbridgeを用意しています。既定の`/api/generate`やrouting defaultは変更していません。
 
 詳細:
 

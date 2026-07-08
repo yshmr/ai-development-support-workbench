@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   auditAgentContractChecklistCoverage,
-  createAgentContractChecklist
+  createAgentContractChecklist,
+  formatAgentContractChecklistForPrompt
 } from "@/lib/agent/contract-checklist";
 import {
   loadContractChecklistEvaluationCases,
@@ -332,6 +333,19 @@ describe("Agent Phase 2-C contract-detail checklist foundation", () => {
     expect(audit.needsReviewCount).toBe(0);
     expect(audit.items.every((item) => item.status === "covered")).toBe(true);
     expect(JSON.stringify(audit)).not.toContain("open、in_progress");
+  });
+
+  it("formats checklist prompt guidance without the raw requirement memo", () => {
+    const requirementMemo =
+      "検索結果をopen、in_progress、resolved、archivedで絞り込みたい。複数ステータスを選べて、URL query parameterのstatusへcomma separated valueとして保持したい。初期並び順は関連度順で、0件のときは空状態を表示したい。";
+    const checklist = createAgentContractChecklist({ requirementMemo });
+    const promptText = formatAgentContractChecklistForPrompt(checklist);
+
+    expect(promptText).toContain("contract-detail-checklist-v1");
+    expect(promptText).toContain("CONTRACT-CHECK-001");
+    expect(promptText).toContain("query_parameter");
+    expect(promptText).not.toContain(requirementMemo);
+    expect(promptText).not.toContain("open、in_progress");
   });
 
   it("marks weak outputs for manual review instead of auto-scoring quality", () => {

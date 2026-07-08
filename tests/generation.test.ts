@@ -299,6 +299,34 @@ describe("generation service", () => {
     expect(result.totalTokens).toBe(33);
   });
 
+  it("adds contract checklist reference text only when explicitly provided", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openai");
+    vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        output_text: JSON.stringify(createMockGeneration(sampleInput))
+      })
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await generateFromRequirementMemo(sampleInput, {
+      contractChecklistText:
+        "policyVersion: contract-detail-checklist-v1\n- CONTRACT-CHECK-001"
+    });
+
+    const [, requestInit] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit
+    ];
+    const body = String(requestInit.body);
+
+    expect(body).toContain("Contract-detail checklist is reference guidance");
+    expect(body).toContain("contract-detail-checklist-v1");
+    expect(body).toContain("CONTRACT-CHECK-001");
+    expect(body).not.toContain("test-openai-key");
+  });
+
   it("parses Gemini response.text", async () => {
     vi.stubEnv("LLM_PROVIDER", "gemini");
     vi.stubEnv("GEMINI_API_KEY", "test-key");

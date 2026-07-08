@@ -244,6 +244,23 @@ Interpretation:
 - the result is a local fixture-based gate, not a real LLM quality result
 - provider-backed generation and blind scoring remain separate future work
 
+## Prompt Context Bridge
+
+Phase 2-C also prepares a minimal prompt bridge for a future lightweight
+checklist experiment:
+
+- `formatAgentContractChecklistForPrompt` converts deterministic checklist items
+  into reference guidance
+- the formatted text does not include the raw requirement memo
+- `generateFromRequirementMemo` accepts `contractChecklistText` only as an
+  explicit option
+- default generation, `/api/generate`, RAG behavior, Agent workflow, and routing
+  defaults are unchanged
+
+The checklist reference is scoped as guidance for preserving details already in
+the requirement memo. It is not treated as new product knowledge or a separate
+source of truth.
+
 The next possible step would be a separate lightweight checklist experiment:
 
 - keep single-pass generation
