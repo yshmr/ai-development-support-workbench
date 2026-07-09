@@ -361,6 +361,7 @@ Phase 2-Eでは、low-risk detail-dense専用target datasetと、single-pass bas
 - [AI Agent Phase 2-C contract-detail routing spike](docs/agent_poc/phase_2_c_contract_detail_routing.md)
 - [AI Agent Phase 2-D contract checklist evaluation](docs/agent_poc/phase_2_d_contract_checklist_evaluation.md)
 - [AI Agent Phase 2-E contract-detail target dataset](docs/agent_poc/phase_2_e_contract_detail_target_dataset.md)
+- [AI Agent Phase 2 retrospective and next hypothesis](docs/agent_poc/phase_2_retrospective_next_hypothesis.md)
 - [Context-isolated blind evaluation workflow](docs/agent_poc/context_isolated_blind_evaluation_workflow.md)
 
 ## Tech Stack
