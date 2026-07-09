@@ -12,7 +12,7 @@ async function main() {
 
   if (!phaseArg || !scoreFilePathArg) {
     throw new Error(
-      "Usage: npm run agent:evaluation:import-scores -- <phase_1_e|phase_2_a|phase_2_b> <scoreFilePath> [outputPath]"
+      "Usage: npm run agent:evaluation:import-scores -- <phase_1_e|phase_2_a|phase_2_b|phase_2_d|phase_2_e> <scoreFilePath> [outputPath]"
     );
   }
 

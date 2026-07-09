@@ -9,8 +9,8 @@ but only one routed run used `lightweightChecklistRecommended: true`. That is
 too small to evaluate whether checklist guidance improves the contract-detail
 failure class.
 
-Phase 2-E therefore adds a local-only target dataset before any additional
-provider-backed formal run.
+Phase 2-E therefore adds a local-only target dataset and the provider-backed
+baseline/checklist evaluation harness for that target dataset.
 
 ## Dataset
 
@@ -75,10 +75,39 @@ Case-level result:
 
 This is a dataset and routing calibration step only.
 
-It does not prove checklist quality improvement because it does not run real
-generation or blind scoring. It establishes that Phase 2-E has enough
-checklist-recommended low-risk cases to make a future provider-backed checklist
-experiment meaningful.
+It does not prove checklist quality improvement by itself. It establishes that
+Phase 2-E has enough checklist-recommended low-risk cases to make a
+provider-backed checklist experiment meaningful.
+
+## Provider-Backed Evaluation Workflow
+
+The real evaluation command should be run from a normal local PowerShell with
+Docker/Qdrant, `.env.local`, and provider credentials ready:
+
+```bash
+npm run agent:contract-checklist:evaluate:run
+```
+
+This creates local-only raw, blind, sample mapping, and manual score template
+artifacts under `data/agent/evaluation/phase_2_e_*`. Those files are ignored by
+Git.
+
+After blind scoring is completed in the context-isolated evaluator workspace,
+import the evaluator JSON and summarize:
+
+```bash
+npm run agent:evaluation:export-blind-package -- phase_2_e
+npm run agent:evaluation:import-scores -- phase_2_e C:\path\to\blind_workspace\output\manual_scores.json
+npm run agent:contract-checklist:evaluate:summarize
+```
+
+The evaluation compares:
+
+- `baseline`: single-pass grounded generation with document-diversity RAG context
+- `checklist`: the same single-pass grounded generation plus deterministic
+  `contractChecklistText`
+
+It does not change `/api/generate`, routing defaults, or prior routing results.
 
 ## Non-Goals
 
@@ -87,7 +116,7 @@ Phase 2-E target dataset preparation does not:
 - change `/api/generate`
 - change routing defaults
 - change Phase 2-A / 2-B / 2-D results
-- run providers
-- call Qdrant
-- call Embeddings
+- run providers during calibration
+- call Qdrant during calibration
+- call Embeddings during calibration
 - commit local evaluation bundles

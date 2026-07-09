@@ -38,6 +38,12 @@ import {
   formatAgentContractChecklistForPrompt
 } from "./contract-checklist";
 import {
+  agentRoutingCalibrationCaseSchema,
+  agentRoutingContractTargetCasesPath,
+  validateAgentRoutingCalibrationCases,
+  type AgentRoutingCalibrationCase
+} from "./routing-calibration";
+import {
   agentPlanSchema,
   agentReviewHistoryEntrySchema,
   agentRunMetadataSchema,
@@ -170,6 +176,34 @@ export const agentRoutingContractEvaluationManualScoreTemplatePath = path.join(
   agentEvaluationDirectory,
   "phase_2_d_manual_score_template.md"
 );
+export const agentContractChecklistEvaluationRawBundlePath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_e_raw_bundle.json"
+);
+export const agentContractChecklistEvaluationBlindBundlePath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_e_blind_bundle.json"
+);
+export const agentContractChecklistEvaluationSampleMappingPath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_e_sample_mapping.json"
+);
+export const agentContractChecklistEvaluationManualScoresPath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_e_manual_scores.json"
+);
+export const agentContractChecklistEvaluationSummaryPath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_e_summary.json"
+);
+export const agentContractChecklistEvaluationReportPath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_e_report.md"
+);
+export const agentContractChecklistEvaluationManualScoreTemplatePath = path.join(
+  agentEvaluationDirectory,
+  "phase_2_e_manual_score_template.md"
+);
 
 const manualScoreAxisNames = [
   "productSpecificRuleCoverage",
@@ -188,6 +222,11 @@ export const routingEvaluationIdSchema = z.enum([
   "agent-phase-2-a-routing",
   "agent-phase-2-b-routing-v2",
   "agent-phase-2-d-contract-checklist"
+]);
+export const contractChecklistEvaluationId = "agent-phase-2-e-contract-target";
+export const contractChecklistEvaluationModeSchema = z.enum([
+  "baseline",
+  "checklist"
 ]);
 
 export const agentEvaluationCaseSchema = z.object({
@@ -391,6 +430,83 @@ export const routingManualScoresFileSchema = manualScoresFileSchema.extend({
   evaluationId: routingEvaluationIdSchema
 });
 
+export const agentContractTargetCasesSchema = z
+  .array(agentRoutingCalibrationCaseSchema)
+  .length(8);
+
+export const plannedContractChecklistEvaluationRunSchema = z.object({
+  rawRunId: z.string().min(1),
+  executionOrder: z.number().int().positive(),
+  pairId: z.string().min(1),
+  caseId: z.string().min(1),
+  runIndex: z.number().int().positive(),
+  mode: contractChecklistEvaluationModeSchema
+});
+
+export const rawContractChecklistEvaluationRunSchema = z.object({
+  rawRunId: z.string().min(1),
+  executionOrder: z.number().int().positive(),
+  pairId: z.string().min(1),
+  caseId: z.string().min(1),
+  caseTitle: z.string().min(1),
+  runIndex: z.number().int().positive(),
+  mode: contractChecklistEvaluationModeSchema,
+  requirementMemo: z.string().min(1),
+  request: z.record(z.unknown()),
+  status: z.enum(["completed", "failed"]),
+  provider: z.string().min(1).optional(),
+  modelName: z.string().min(1).optional(),
+  promptVersion: z.string().min(1).optional(),
+  evaluationElapsedMs: z.number().nonnegative(),
+  finalOutput: generationOutputSchema.optional(),
+  rag: ragMetadataSchema.optional(),
+  usage: usageSchema.optional(),
+  checklistRecommended: z.boolean(),
+  error: z
+    .object({
+      message: z.string().min(1)
+    })
+    .optional()
+});
+
+export const rawContractChecklistEvaluationBundleSchema = z.object({
+  evaluationId: z.literal(contractChecklistEvaluationId),
+  createdAt: z.string().datetime(),
+  runMatrix: z.object({
+    totalRuns: z.literal(16),
+    baselineRuns: z.literal(8),
+    checklistRuns: z.literal(8)
+  }),
+  cases: agentContractTargetCasesSchema,
+  runs: z.array(rawContractChecklistEvaluationRunSchema).length(16)
+});
+
+export const contractChecklistSampleMappingEntrySchema = z.object({
+  sampleId: z.string().regex(/^SAMPLE-\d{3}$/),
+  rawRunId: z.string().min(1),
+  pairId: z.string().min(1),
+  caseId: z.string().min(1),
+  runIndex: z.number().int().positive(),
+  mode: contractChecklistEvaluationModeSchema,
+  executionOrder: z.number().int().positive()
+});
+
+export const contractChecklistSampleMappingFileSchema = z.object({
+  evaluationId: z.literal(contractChecklistEvaluationId),
+  createdAt: z.string().datetime(),
+  mappings: z.array(contractChecklistSampleMappingEntrySchema)
+});
+
+export const blindContractChecklistEvaluationBundleSchema =
+  blindEvaluationBundleSchema.extend({
+    evaluationId: z.literal(contractChecklistEvaluationId)
+  });
+
+export const contractChecklistManualScoresFileSchema =
+  manualScoresFileSchema.extend({
+    evaluationId: z.literal(contractChecklistEvaluationId)
+  });
+
 export type AgentEvaluationCase = z.infer<typeof agentEvaluationCaseSchema>;
 export type PlannedEvaluationRun = z.infer<typeof plannedEvaluationRunSchema>;
 export type RawEvaluationRun = z.infer<typeof rawEvaluationRunSchema>;
@@ -418,6 +534,27 @@ export type RoutingSampleMappingFile = z.infer<
 >;
 export type RoutingManualScoresFile = z.infer<
   typeof routingManualScoresFileSchema
+>;
+export type ContractChecklistEvaluationMode = z.infer<
+  typeof contractChecklistEvaluationModeSchema
+>;
+export type PlannedContractChecklistEvaluationRun = z.infer<
+  typeof plannedContractChecklistEvaluationRunSchema
+>;
+export type RawContractChecklistEvaluationRun = z.infer<
+  typeof rawContractChecklistEvaluationRunSchema
+>;
+export type RawContractChecklistEvaluationBundle = z.infer<
+  typeof rawContractChecklistEvaluationBundleSchema
+>;
+export type BlindContractChecklistEvaluationBundle = z.infer<
+  typeof blindContractChecklistEvaluationBundleSchema
+>;
+export type ContractChecklistSampleMappingFile = z.infer<
+  typeof contractChecklistSampleMappingFileSchema
+>;
+export type ContractChecklistManualScoresFile = z.infer<
+  typeof contractChecklistManualScoresFileSchema
 >;
 
 type ExecuteRunResult = Omit<
@@ -453,6 +590,23 @@ type ExecuteRoutingEvaluationRun = (
   testCase: AgentEvaluationCase,
   plannedRun: PlannedRoutingEvaluationRun
 ) => Promise<ExecuteRoutingRunResult>;
+
+type ExecuteContractChecklistRunResult = Omit<
+  RawContractChecklistEvaluationRun,
+  | "rawRunId"
+  | "executionOrder"
+  | "pairId"
+  | "caseId"
+  | "caseTitle"
+  | "runIndex"
+  | "mode"
+  | "requirementMemo"
+>;
+
+type ExecuteContractChecklistEvaluationRun = (
+  testCase: AgentRoutingCalibrationCase,
+  plannedRun: PlannedContractChecklistEvaluationRun
+) => Promise<ExecuteContractChecklistRunResult>;
 
 function getTimerNow(): number {
   try {
@@ -551,6 +705,27 @@ export async function loadAgentEvaluationCases(
   );
 }
 
+export function validateAgentContractTargetCases(
+  cases: AgentRoutingCalibrationCase[]
+): AgentRoutingCalibrationCase[] {
+  const parsedCases = agentContractTargetCasesSchema.parse(cases);
+  assertUniqueStrings(
+    parsedCases.map((testCase) => testCase.caseId),
+    "agent contract target cases"
+  );
+  validateAgentRoutingCalibrationCases(parsedCases);
+
+  return parsedCases;
+}
+
+export async function loadAgentContractTargetCases(
+  filePath = agentRoutingContractTargetCasesPath
+): Promise<AgentRoutingCalibrationCase[]> {
+  return validateAgentContractTargetCases(
+    await readJsonFile(filePath, agentContractTargetCasesSchema)
+  );
+}
+
 export function buildAgentEvaluationRunPlan(
   cases: AgentEvaluationCase[]
 ): PlannedEvaluationRun[] {
@@ -598,6 +773,38 @@ export function buildAgentEvaluationRunPlan(
         runIndex: pair.runIndex,
         mode
       });
+    }
+  }
+
+  return runs;
+}
+
+export function buildAgentContractChecklistEvaluationRunPlan(
+  cases: AgentRoutingCalibrationCase[]
+): PlannedContractChecklistEvaluationRun[] {
+  validateAgentContractTargetCases(cases);
+  const modeOrders: ContractChecklistEvaluationMode[][] = [
+    ["baseline", "checklist"],
+    ["checklist", "baseline"]
+  ];
+  const runs: PlannedContractChecklistEvaluationRun[] = [];
+
+  for (const [caseIndex, testCase] of cases.entries()) {
+    const pairNumber = caseIndex + 1;
+    const modeOrder = modeOrders[caseIndex % modeOrders.length];
+
+    for (const mode of modeOrder) {
+      const executionOrder = runs.length + 1;
+      runs.push(
+        plannedContractChecklistEvaluationRunSchema.parse({
+          rawRunId: `CHECKLIST-RUN-${String(executionOrder).padStart(3, "0")}`,
+          executionOrder,
+          pairId: `CHECKLIST-PAIR-${String(pairNumber).padStart(3, "0")}`,
+          caseId: testCase.caseId,
+          runIndex: 1,
+          mode
+        })
+      );
     }
   }
 
@@ -724,6 +931,19 @@ export function assertRoutingEvaluationBundleIsScorable(
   }
 }
 
+export function assertContractChecklistEvaluationBundleIsScorable(
+  rawBundle: RawContractChecklistEvaluationBundle
+) {
+  const failedRuns = rawBundle.runs.filter((run) => run.status === "failed");
+  const missingOutputRuns = rawBundle.runs.filter((run) => !run.finalOutput);
+
+  if (failedRuns.length > 0 || missingOutputRuns.length > 0) {
+    throw new Error(
+      `Contract checklist evaluation is not scorable: failedRuns=${failedRuns.length}, missingFinalOutputRuns=${missingOutputRuns.length}. Raw bundle was written for diagnostics; rerun after fixing the execution environment.`
+    );
+  }
+}
+
 function buildRawRun(input: {
   plannedRun: PlannedEvaluationRun;
   testCase: AgentEvaluationCase;
@@ -748,6 +968,24 @@ function buildRoutingRawRun(input: {
   result: ExecuteRoutingRunResult;
 }): RawRoutingEvaluationRun {
   return rawRoutingEvaluationRunSchema.parse({
+    rawRunId: input.plannedRun.rawRunId,
+    executionOrder: input.plannedRun.executionOrder,
+    pairId: input.plannedRun.pairId,
+    caseId: input.testCase.caseId,
+    caseTitle: input.testCase.title,
+    runIndex: input.plannedRun.runIndex,
+    mode: input.plannedRun.mode,
+    requirementMemo: input.testCase.requirementMemo,
+    ...input.result
+  });
+}
+
+function buildContractChecklistRawRun(input: {
+  plannedRun: PlannedContractChecklistEvaluationRun;
+  testCase: AgentRoutingCalibrationCase;
+  result: ExecuteContractChecklistRunResult;
+}): RawContractChecklistEvaluationRun {
+  return rawContractChecklistEvaluationRunSchema.parse({
     rawRunId: input.plannedRun.rawRunId,
     executionOrder: input.plannedRun.executionOrder,
     pairId: input.plannedRun.pairId,
@@ -865,6 +1103,120 @@ export async function executeAgentRoutingEvaluationRunPlan(input: {
     cases,
     runs
   });
+}
+
+export async function executeAgentContractChecklistEvaluationRunPlan(input: {
+  cases: AgentRoutingCalibrationCase[];
+  executeRun?: ExecuteContractChecklistEvaluationRun;
+  createdAt?: string;
+  onRunStart?: (input: {
+    plannedRun: PlannedContractChecklistEvaluationRun;
+    totalRuns: number;
+  }) => void;
+  onRunComplete?: (input: {
+    plannedRun: PlannedContractChecklistEvaluationRun;
+    totalRuns: number;
+    rawRun: RawContractChecklistEvaluationRun;
+  }) => void;
+}): Promise<RawContractChecklistEvaluationBundle> {
+  const cases = validateAgentContractTargetCases(input.cases);
+  const caseById = new Map(cases.map((testCase) => [testCase.caseId, testCase]));
+  const plannedRuns = buildAgentContractChecklistEvaluationRunPlan(cases);
+  const runs: RawContractChecklistEvaluationRun[] = [];
+  const executeRun = input.executeRun ?? executeContractChecklistRun;
+
+  for (const plannedRun of plannedRuns) {
+    const testCase = caseById.get(plannedRun.caseId);
+
+    if (!testCase) {
+      throw new Error(`Unknown planned caseId: ${plannedRun.caseId}`);
+    }
+
+    input.onRunStart?.({ plannedRun, totalRuns: plannedRuns.length });
+
+    const result = await executeRun(testCase, plannedRun);
+    const rawRun = buildContractChecklistRawRun({
+      plannedRun,
+      testCase,
+      result
+    });
+    runs.push(rawRun);
+    input.onRunComplete?.({
+      plannedRun,
+      totalRuns: plannedRuns.length,
+      rawRun
+    });
+  }
+
+  return rawContractChecklistEvaluationBundleSchema.parse({
+    evaluationId: contractChecklistEvaluationId,
+    createdAt: input.createdAt ?? new Date().toISOString(),
+    runMatrix: {
+      totalRuns: 16,
+      baselineRuns: 8,
+      checklistRuns: 8
+    },
+    cases,
+    runs
+  });
+}
+
+async function executeContractChecklistRun(
+  testCase: AgentRoutingCalibrationCase,
+  plannedRun: PlannedContractChecklistEvaluationRun
+): Promise<ExecuteContractChecklistRunResult> {
+  const request = { inputText: testCase.requirementMemo };
+  const startedAtMs = getTimerNow();
+
+  try {
+    const ragMetadata = await retrieveRagMetadataForSinglePass(
+      request.inputText,
+      "document-diversity-v1"
+    );
+    const routingDecision = createAgentRoutingContractCandidateDecision({
+      requirementMemo: request.inputText
+    });
+    const checklist = createAgentContractChecklist({
+      requirementMemo: request.inputText,
+      routingDecision
+    });
+    const contractChecklistText =
+      plannedRun.mode === "checklist"
+        ? formatAgentContractChecklistForPrompt(checklist)
+        : undefined;
+    const result = await generateFromRequirementMemo(request.inputText, {
+      ragContextText: ragMetadata.contextText,
+      contractChecklistText
+    });
+
+    return {
+      request,
+      status: "completed",
+      provider: result.provider,
+      modelName: result.modelName,
+      promptVersion: result.promptVersion,
+      evaluationElapsedMs: toNonNegativeDurationMs(startedAtMs),
+      finalOutput: result.output,
+      rag: ragMetadata.metadata,
+      usage: {
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        totalTokens: result.totalTokens
+      },
+      checklistRecommended: checklist.recommended
+    };
+  } catch (error) {
+    return {
+      request,
+      status: "failed",
+      promptVersion: getPromptVersion(),
+      evaluationElapsedMs: toNonNegativeDurationMs(startedAtMs),
+      checklistRecommended: plannedRun.mode === "checklist",
+      error: {
+        message: error instanceof Error ? error.message : String(error)
+      }
+    };
+  }
 }
 
 async function executeAgentOffRun(
@@ -1321,6 +1673,85 @@ export function createBlindRoutingBundleAndMapping(
   };
 }
 
+export function createBlindContractChecklistBundleAndMapping(
+  rawBundle: RawContractChecklistEvaluationBundle
+): {
+  blindBundle: BlindContractChecklistEvaluationBundle;
+  mappingFile: ContractChecklistSampleMappingFile;
+} {
+  const caseById = new Map(
+    rawBundle.cases.map((testCase) => [testCase.caseId, testCase])
+  );
+  const completedRuns = rawBundle.runs.filter((run) => run.finalOutput);
+  const orderedRuns = [...completedRuns].sort((a, b) => {
+    const hashA = stableHash(
+      `${rawBundle.evaluationId}-blind-v1:${a.rawRunId}:${a.caseId}:${a.mode}`
+    );
+    const hashB = stableHash(
+      `${rawBundle.evaluationId}-blind-v1:${b.rawRunId}:${b.caseId}:${b.mode}`
+    );
+    return hashA.localeCompare(hashB);
+  });
+  const createdAt = new Date().toISOString();
+  const samples = orderedRuns.map((run, index) => {
+    const testCase = caseById.get(run.caseId);
+
+    if (!testCase) {
+      throw new Error(`Unknown raw run caseId: ${run.caseId}`);
+    }
+
+    return {
+      sampleId: `SAMPLE-${String(index + 1).padStart(3, "0")}`,
+      caseId: testCase.caseId,
+      caseTitle: testCase.title,
+      requirementMemo: testCase.requirementMemo,
+      expectations: {
+        expectedRelevantDocumentIds: [],
+        importantExpectedRules: [
+          "Preserve exact query parameter names and value formats.",
+          "Preserve enum values or allowed option values from the requirement memo.",
+          "State default behavior as testable acceptance criteria.",
+          "State URL reload, sharing, or persistence expectations when present.",
+          "Trace contract details into acceptance criteria and implementation tasks."
+        ],
+        unsupportedAssumptionsToAvoid: [
+          "Do not introduce backend, security, lifecycle, or policy requirements not present in the memo.",
+          "Do not infer Agent workflow metadata, routing mode, provider, latency, or checklist status."
+        ],
+        crossFieldConsistencyChecks: [
+          "summary, spec, acceptanceCriteria, jiraTasks, implementationPlan, reviewPoints, and risks should use consistent query parameter names and values.",
+          "Jira tasks should cover the same contract details stated in acceptance criteria."
+        ]
+      },
+      finalOutput: requireCompletedOutput(run)
+    };
+  });
+  const mappings = orderedRuns.map((run, index) => ({
+    sampleId: `SAMPLE-${String(index + 1).padStart(3, "0")}`,
+    rawRunId: run.rawRunId,
+    pairId: run.pairId,
+    caseId: run.caseId,
+    runIndex: run.runIndex,
+    mode: run.mode,
+    executionOrder: run.executionOrder
+  }));
+
+  return {
+    blindBundle: blindContractChecklistEvaluationBundleSchema.parse({
+      evaluationId: rawBundle.evaluationId,
+      createdAt,
+      scoringMethod: "blind-manual",
+      generationOutputSchema: generationOutputJsonSchema,
+      samples
+    }),
+    mappingFile: contractChecklistSampleMappingFileSchema.parse({
+      evaluationId: rawBundle.evaluationId,
+      createdAt,
+      mappings
+    })
+  };
+}
+
 export function assertBlindBundleHasNoModeLeak(blindBundle: unknown) {
   const serializedBundle = JSON.stringify(blindBundle);
   const forbiddenMarkers = [
@@ -1432,6 +1863,36 @@ export function validateRoutingManualScores(
 
   if (missingSample) {
     throw new Error(`Routing manual score is missing sampleId: ${missingSample}`);
+  }
+
+  return parsedScores;
+}
+
+export function validateContractChecklistManualScores(
+  manualScores: ContractChecklistManualScoresFile,
+  blindBundle: BlindContractChecklistEvaluationBundle
+): ContractChecklistManualScoresFile {
+  const parsedScores = contractChecklistManualScoresFileSchema.parse(manualScores);
+  const expectedSampleIds = blindBundle.samples.map((sample) => sample.sampleId);
+  const actualSampleIds = parsedScores.scores.map((score) => score.sampleId);
+
+  assertUniqueStrings(actualSampleIds, "contract checklist manual score sampleIds");
+
+  const expectedSet = new Set(expectedSampleIds);
+  const actualSet = new Set(actualSampleIds);
+  const unknownSample = actualSampleIds.find((sampleId) => !expectedSet.has(sampleId));
+  const missingSample = expectedSampleIds.find((sampleId) => !actualSet.has(sampleId));
+
+  if (unknownSample) {
+    throw new Error(
+      `Contract checklist manual score contains unknown sampleId: ${unknownSample}`
+    );
+  }
+
+  if (missingSample) {
+    throw new Error(
+      `Contract checklist manual score is missing sampleId: ${missingSample}`
+    );
   }
 
   return parsedScores;
@@ -1572,6 +2033,36 @@ function getRoutingScoreByMode(input: {
   });
 }
 
+function getContractChecklistScoreByMode(input: {
+  rawBundle: RawContractChecklistEvaluationBundle;
+  mappingFile: ContractChecklistSampleMappingFile;
+  manualScores: ContractChecklistManualScoresFile;
+}) {
+  const runByRawId = new Map(
+    input.rawBundle.runs.map((run) => [run.rawRunId, run])
+  );
+  const scoreBySampleId = new Map(
+    input.manualScores.scores.map((score) => [score.sampleId, score])
+  );
+
+  return input.mappingFile.mappings.map((mapping) => {
+    const score = scoreBySampleId.get(mapping.sampleId);
+    const run = runByRawId.get(mapping.rawRunId);
+
+    if (!score || !run) {
+      throw new Error(
+        `Unable to join contract checklist manual score for sample: ${mapping.sampleId}`
+      );
+    }
+
+    return {
+      mapping,
+      run,
+      score
+    };
+  });
+}
+
 export function aggregateRoutingQualityScores(input: {
   rawBundle: RawRoutingEvaluationBundle;
   mappingFile: RoutingSampleMappingFile;
@@ -1663,6 +2154,73 @@ export function aggregateRoutingQualityScores(input: {
   };
 }
 
+export function aggregateContractChecklistQualityScores(input: {
+  rawBundle: RawContractChecklistEvaluationBundle;
+  mappingFile: ContractChecklistSampleMappingFile;
+  manualScores: ContractChecklistManualScoresFile;
+}) {
+  const joinedScores = getContractChecklistScoreByMode(input);
+  const byMode = (mode: ContractChecklistEvaluationMode) =>
+    joinedScores.filter((entry) => entry.mapping.mode === mode);
+  const sampleAverageByMode = (mode: ContractChecklistEvaluationMode) =>
+    byMode(mode).map((entry) => averageManualScore(entry.score.scores));
+  const axisSummaries = Object.fromEntries(
+    manualScoreAxisNames.map((axis) => {
+      const baselineValues = byMode("baseline").map(
+        (entry) => entry.score.scores[axis]
+      );
+      const checklistValues = byMode("checklist").map(
+        (entry) => entry.score.scores[axis]
+      );
+      const baselineMean = mean(baselineValues);
+      const checklistMean = mean(checklistValues);
+
+      return [
+        axis,
+        {
+          baselineMean,
+          checklistMean,
+          checklistMinusBaseline:
+            checklistMean !== undefined && baselineMean !== undefined
+              ? checklistMean - baselineMean
+              : undefined
+        }
+      ];
+    })
+  );
+  const pairSummaries = pairContractChecklistJoinedScores(joinedScores);
+  const pairedWinTieLoss = pairSummaries.reduce(
+    (summary, pair) => {
+      if (pair.checklistAverage > pair.baselineAverage) {
+        summary.checklistWins += 1;
+      } else if (pair.checklistAverage < pair.baselineAverage) {
+        summary.baselineWins += 1;
+      } else {
+        summary.ties += 1;
+      }
+
+      return summary;
+    },
+    { checklistWins: 0, baselineWins: 0, ties: 0 }
+  );
+
+  return {
+    modeSummary: {
+      baseline: {
+        mean: mean(sampleAverageByMode("baseline")),
+        median: median(sampleAverageByMode("baseline"))
+      },
+      checklist: {
+        mean: mean(sampleAverageByMode("checklist")),
+        median: median(sampleAverageByMode("checklist"))
+      }
+    },
+    axisSummaries,
+    pairedWinTieLoss,
+    pairSummaries
+  };
+}
+
 function pairJoinedScores(
   joinedScores: ReturnType<typeof getScoreByMode>
 ): Array<{
@@ -1745,6 +2303,51 @@ function pairRoutingJoinedScores(
       routedAverage,
       routedMinusOff: routedAverage - offAverage,
       routedMinusOn: routedAverage - onAverage
+    };
+  });
+}
+
+function pairContractChecklistJoinedScores(
+  joinedScores: ReturnType<typeof getContractChecklistScoreByMode>
+): Array<{
+  pairId: string;
+  caseId: string;
+  runIndex: number;
+  baselineAverage: number;
+  checklistAverage: number;
+  delta: number;
+}> {
+  const grouped = new Map<string, typeof joinedScores>();
+
+  for (const entry of joinedScores) {
+    const key = `${entry.mapping.caseId}:${entry.mapping.runIndex}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), entry]);
+  }
+
+  return [...grouped.values()].map((entries) => {
+    const baselineEntry = entries.find(
+      (entry) => entry.mapping.mode === "baseline"
+    );
+    const checklistEntry = entries.find(
+      (entry) => entry.mapping.mode === "checklist"
+    );
+
+    if (!baselineEntry || !checklistEntry) {
+      throw new Error(
+        "Contract checklist manual scores must include baseline and checklist for each pair."
+      );
+    }
+
+    const baselineAverage = averageManualScore(baselineEntry.score.scores);
+    const checklistAverage = averageManualScore(checklistEntry.score.scores);
+
+    return {
+      pairId: baselineEntry.mapping.pairId,
+      caseId: baselineEntry.mapping.caseId,
+      runIndex: baselineEntry.mapping.runIndex,
+      baselineAverage,
+      checklistAverage,
+      delta: checklistAverage - baselineAverage
     };
   });
 }
@@ -2036,6 +2639,72 @@ export function aggregateRoutingLatencyAndUsage(
   };
 }
 
+export function aggregateContractChecklistLatencyAndUsage(
+  rawBundle: RawContractChecklistEvaluationBundle
+) {
+  const summarizeMode = (mode: ContractChecklistEvaluationMode) => {
+    const runs = rawBundle.runs.filter((run) => run.mode === mode);
+
+    return {
+      evaluationElapsedMs: {
+        mean: mean(runs.map((run) => run.evaluationElapsedMs)),
+        median: median(runs.map((run) => run.evaluationElapsedMs))
+      },
+      inputTokens: {
+        mean: mean(
+          runs
+            .map((run) => run.usage?.inputTokens)
+            .filter((value): value is number => value !== undefined)
+        )
+      },
+      outputTokens: {
+        mean: mean(
+          runs
+            .map((run) => run.usage?.outputTokens)
+            .filter((value): value is number => value !== undefined)
+        )
+      },
+      totalTokens: {
+        mean: mean(
+          runs
+            .map((run) => run.usage?.totalTokens)
+            .filter((value): value is number => value !== undefined)
+        )
+      },
+      retrievalLatencyMs: {
+        mean: mean(
+          runs
+            .map((run) =>
+              run.rag?.mode === "on" ? run.rag.retrievalLatencyMs : undefined
+            )
+            .filter((value): value is number => value !== undefined)
+        )
+      }
+    };
+  };
+  const baseline = summarizeMode("baseline");
+  const checklist = summarizeMode("checklist");
+  const checklistVsBaselineElapsedRatio =
+    checklist.evaluationElapsedMs.mean !== undefined &&
+    baseline.evaluationElapsedMs.mean !== undefined &&
+    baseline.evaluationElapsedMs.mean > 0
+      ? checklist.evaluationElapsedMs.mean / baseline.evaluationElapsedMs.mean
+      : undefined;
+  const checklistVsBaselineTokenRatio =
+    checklist.totalTokens.mean !== undefined &&
+    baseline.totalTokens.mean !== undefined &&
+    baseline.totalTokens.mean > 0
+      ? checklist.totalTokens.mean / baseline.totalTokens.mean
+      : undefined;
+
+  return {
+    baseline,
+    checklist,
+    checklistVsBaselineElapsedRatio,
+    checklistVsBaselineTokenRatio
+  };
+}
+
 export function createRevisionPairs(rawBundle: RawEvaluationBundle) {
   const revisionRuns = rawBundle.runs.filter(
     (run) => run.mode === "on" && (run.agent?.metadata.revisionCount ?? 0) > 0
@@ -2118,6 +2787,32 @@ export function createRoutingEvaluationSummary(input: {
   };
 }
 
+export function createContractChecklistEvaluationSummary(input: {
+  rawBundle: RawContractChecklistEvaluationBundle;
+  blindBundle: BlindContractChecklistEvaluationBundle;
+  mappingFile: ContractChecklistSampleMappingFile;
+  manualScores: ContractChecklistManualScoresFile;
+}) {
+  const validatedScores = validateContractChecklistManualScores(
+    input.manualScores,
+    input.blindBundle
+  );
+  const quality = aggregateContractChecklistQualityScores({
+    rawBundle: input.rawBundle,
+    mappingFile: input.mappingFile,
+    manualScores: validatedScores
+  });
+
+  return {
+    evaluationId: input.rawBundle.evaluationId,
+    createdAt: new Date().toISOString(),
+    scoringMethod: validatedScores.scoringMethod,
+    runMatrix: input.rawBundle.runMatrix,
+    quality,
+    latencyAndUsage: aggregateContractChecklistLatencyAndUsage(input.rawBundle)
+  };
+}
+
 export function createEvaluationReportMarkdown(summary: ReturnType<typeof createEvaluationSummary>) {
   return [
     "# Agent PoC Phase 1-E Evaluation Report",
@@ -2148,6 +2843,40 @@ export function createEvaluationReportMarkdown(summary: ReturnType<typeof create
     "## Scope Note",
     "",
     "These results apply only to the Phase 1-E dataset, current prompt/schema, current local environment, and manually scored blind samples."
+  ].join("\n");
+}
+
+export function createContractChecklistEvaluationReportMarkdown(
+  summary: ReturnType<typeof createContractChecklistEvaluationSummary>
+) {
+  return [
+    `# Agent PoC Contract Checklist Target Evaluation Report (${summary.evaluationId})`,
+    "",
+    "This report was generated from the contract-detail target raw bundle, blind sample mapping, and blind manual scores.",
+    "",
+    "## Quality Summary",
+    "",
+    `- Baseline mean: ${formatOptionalNumber(summary.quality.modeSummary.baseline.mean)}`,
+    `- Checklist mean: ${formatOptionalNumber(summary.quality.modeSummary.checklist.mean)}`,
+    `- Checklist wins: ${summary.quality.pairedWinTieLoss.checklistWins}`,
+    `- Baseline wins: ${summary.quality.pairedWinTieLoss.baselineWins}`,
+    `- Ties: ${summary.quality.pairedWinTieLoss.ties}`,
+    "",
+    "## Axis Deltas",
+    "",
+    ...manualScoreAxisNames.map((axis) => {
+      const axisSummary = summary.quality.axisSummaries[axis];
+      return `- ${axis}: baseline=${formatOptionalNumber(axisSummary.baselineMean)} checklist=${formatOptionalNumber(axisSummary.checklistMean)} delta=${formatOptionalNumber(axisSummary.checklistMinusBaseline)}`;
+    }),
+    "",
+    "## Cost",
+    "",
+    `- Checklist / baseline elapsed ratio: ${formatOptionalNumber(summary.latencyAndUsage.checklistVsBaselineElapsedRatio)}`,
+    `- Checklist / baseline token ratio: ${formatOptionalNumber(summary.latencyAndUsage.checklistVsBaselineTokenRatio)}`,
+    "",
+    "## Scope Note",
+    "",
+    "These results apply only to the Phase 2-E low-risk contract-detail target dataset, current prompt/schema, current local environment, and blind scored samples."
   ].join("\n");
 }
 

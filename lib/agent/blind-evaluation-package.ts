@@ -9,20 +9,27 @@ import {
   agentRoutingEvaluationManualScoresPath,
   agentRoutingContractEvaluationBlindBundlePath,
   agentRoutingContractEvaluationManualScoresPath,
+  agentContractChecklistEvaluationBlindBundlePath,
+  agentContractChecklistEvaluationManualScoresPath,
   agentRoutingV2EvaluationBlindBundlePath,
   agentRoutingV2EvaluationManualScoresPath,
   assertBlindBundleHasNoModeLeak,
   blindEvaluationBundleSchema,
+  blindContractChecklistEvaluationBundleSchema,
   blindRoutingEvaluationBundleSchema,
+  contractChecklistManualScoresFileSchema,
   manualScoresFileSchema,
   readJsonFile,
   routingManualScoresFileSchema,
   validateManualScores,
+  validateContractChecklistManualScores,
   validateRoutingManualScores,
   writeJsonFile,
   writeTextFile,
   type BlindEvaluationBundle,
+  type BlindContractChecklistEvaluationBundle,
   type BlindRoutingEvaluationBundle,
+  type ContractChecklistManualScoresFile,
   type ManualScoresFile,
   type RoutingManualScoresFile
 } from "./evaluation";
@@ -31,13 +38,20 @@ export const blindEvaluationPhaseSchema = z.enum([
   "phase_1_e",
   "phase_2_a",
   "phase_2_b",
-  "phase_2_d"
+  "phase_2_d",
+  "phase_2_e"
 ]);
 
 export type BlindEvaluationPhase = z.infer<typeof blindEvaluationPhaseSchema>;
 
-type BlindBundle = BlindEvaluationBundle | BlindRoutingEvaluationBundle;
-type ManualScores = ManualScoresFile | RoutingManualScoresFile;
+type BlindBundle =
+  | BlindEvaluationBundle
+  | BlindRoutingEvaluationBundle
+  | BlindContractChecklistEvaluationBundle;
+type ManualScores =
+  | ManualScoresFile
+  | RoutingManualScoresFile
+  | ContractChecklistManualScoresFile;
 
 type PhaseConfig = {
   phase: BlindEvaluationPhase;
@@ -214,17 +228,33 @@ function getPhaseConfig(phase: BlindEvaluationPhase): PhaseConfig {
     };
   }
 
+  if (phase === "phase_2_d") {
+    return {
+      phase,
+      evaluationId: "agent-phase-2-d-contract-checklist",
+      blindBundlePath: agentRoutingContractEvaluationBlindBundlePath,
+      manualScoresPath: agentRoutingContractEvaluationManualScoresPath,
+      blindSchema: blindRoutingEvaluationBundleSchema,
+      scoreSchema: routingManualScoresFileSchema,
+      validateScores: (scores, blindBundle) =>
+        validateRoutingManualScores(
+          scores as RoutingManualScoresFile,
+          blindBundle as BlindRoutingEvaluationBundle
+        )
+    };
+  }
+
   return {
     phase,
-    evaluationId: "agent-phase-2-d-contract-checklist",
-    blindBundlePath: agentRoutingContractEvaluationBlindBundlePath,
-    manualScoresPath: agentRoutingContractEvaluationManualScoresPath,
-    blindSchema: blindRoutingEvaluationBundleSchema,
-    scoreSchema: routingManualScoresFileSchema,
+    evaluationId: "agent-phase-2-e-contract-target",
+    blindBundlePath: agentContractChecklistEvaluationBlindBundlePath,
+    manualScoresPath: agentContractChecklistEvaluationManualScoresPath,
+    blindSchema: blindContractChecklistEvaluationBundleSchema,
+    scoreSchema: contractChecklistManualScoresFileSchema,
     validateScores: (scores, blindBundle) =>
-      validateRoutingManualScores(
-        scores as RoutingManualScoresFile,
-        blindBundle as BlindRoutingEvaluationBundle
+      validateContractChecklistManualScores(
+        scores as ContractChecklistManualScoresFile,
+        blindBundle as BlindContractChecklistEvaluationBundle
       )
   };
 }

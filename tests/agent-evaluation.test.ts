@@ -10,15 +10,18 @@ import {
 import {
   aggregateAgentMetrics,
   aggregateLatencyAndUsage,
+  aggregateContractChecklistLatencyAndUsage,
   aggregateQualityScores,
   aggregateRetrievalParity,
   aggregateRoutingDecisionMetrics,
   aggregateRoutingLatencyAndUsage,
   aggregateRoutingQualityScores,
   assertBlindBundleHasNoModeLeak,
+  assertContractChecklistEvaluationBundleIsScorable,
   assertNoEvaluationRubricLeak,
   assertRoutingEvaluationBundleIsScorable,
   buildAgentEvaluationRunPlan,
+  buildAgentContractChecklistEvaluationRunPlan,
   buildAgentOffRequest,
   buildAgentOnRequest,
   buildAgentRoutingCandidateDecisionForEvaluation,
@@ -27,19 +30,26 @@ import {
   buildAgentRoutingEvaluationRunPlan,
   buildAgentRoutedRequest,
   createBlindBundleAndMapping,
+  createBlindContractChecklistBundleAndMapping,
   createBlindRoutingBundleAndMapping,
+  createContractChecklistEvaluationSummary,
   createEvaluationSummary,
   createManualScoreTemplate,
   createRoutingEvaluationSummary,
   createRevisionPairs,
   executeAgentEvaluationRunPlan,
+  executeAgentContractChecklistEvaluationRunPlan,
   executeAgentRoutingEvaluationRunPlan,
   loadAgentEvaluationCases,
+  loadAgentContractTargetCases,
+  contractChecklistManualScoresFileSchema,
   manualScoresFileSchema,
   routingManualScoresFileSchema,
   validateAgentEvaluationCases,
+  validateContractChecklistManualScores,
   validateManualScores,
   validateRoutingManualScores,
+  type ContractChecklistManualScoresFile,
   type AgentEvaluationCase,
   type ManualScoresFile,
   type RawEvaluationRun,
@@ -275,6 +285,32 @@ function completeRoutingManualScores(
         requirementToTaskTraceability: 4
       },
       notes: `routing note ${sampleId}`
+    }))
+  });
+}
+
+function completeContractChecklistManualScores(
+  sampleIds: string[],
+  scoringMethod:
+    | "blind-manual"
+    | "context-isolated-blind-llm"
+    | "secondary-blind-llm-check" = "blind-manual"
+): ContractChecklistManualScoresFile {
+  return contractChecklistManualScoresFileSchema.parse({
+    evaluationId: "agent-phase-2-e-contract-target",
+    scoringMethod,
+    scores: sampleIds.map((sampleId, index) => ({
+      sampleId,
+      scores: {
+        productSpecificRuleCoverage: index % 2 === 0 ? 5 : 4,
+        unsupportedAssumptionControl: 4,
+        acceptanceCriteriaSpecificity: 4,
+        jiraDecompositionAppropriateness: 4,
+        jsonStructureStability: 5,
+        crossFieldConsistency: index % 3 === 0 ? 5 : 4,
+        requirementToTaskTraceability: 4
+      },
+      notes: `contract checklist note ${sampleId}`
     }))
   });
 }
@@ -789,6 +825,149 @@ describe("Agent Phase 2-A routing evaluation behavior", () => {
     expect(() => assertRoutingEvaluationBundleIsScorable(rawBundle)).toThrow(
       "Routing evaluation is not scorable"
     );
+  });
+});
+
+describe("Agent Phase 2-E contract checklist target evaluation", () => {
+  async function createContractChecklistStubBundle() {
+    const cases = await loadAgentContractTargetCases();
+    return executeAgentContractChecklistEvaluationRunPlan({
+      cases,
+      createdAt: fixedCreatedAt,
+      executeRun: async (testCase, plannedRun) => ({
+        request: { inputText: testCase.requirementMemo },
+        status: "completed" as const,
+        provider: "openai",
+        modelName: "gpt-5.4-mini",
+        promptVersion: "llm-app-poc-rag-v1",
+        evaluationElapsedMs:
+          plannedRun.mode === "checklist"
+            ? 1200 + plannedRun.executionOrder
+            : 1000 + plannedRun.executionOrder,
+        finalOutput: sampleOutput(`contract-target-${testCase.caseId}`),
+        rag: ragMetadata(["profile-image-spec", "profile-api"]),
+        usage: {
+          inputTokens: plannedRun.mode === "checklist" ? 120 : 100,
+          outputTokens: 80,
+          totalTokens: plannedRun.mode === "checklist" ? 200 : 180
+        },
+        checklistRecommended: true
+      })
+    });
+  }
+
+  it("creates the 16-run baseline/checklist matrix for target cases", async () => {
+    const cases = await loadAgentContractTargetCases();
+    const plan = buildAgentContractChecklistEvaluationRunPlan(cases);
+
+    expect(cases).toHaveLength(8);
+    expect(plan).toHaveLength(16);
+    expect(plan.filter((run) => run.mode === "baseline")).toHaveLength(8);
+    expect(plan.filter((run) => run.mode === "checklist")).toHaveLength(8);
+    expect(plan.slice(0, 4).map((run) => run.mode)).toEqual([
+      "baseline",
+      "checklist",
+      "checklist",
+      "baseline"
+    ]);
+  });
+
+  it("creates blind bundles, validates scores, and summarizes checklist quality", async () => {
+    const rawBundle = await createContractChecklistStubBundle();
+    const { blindBundle, mappingFile } =
+      createBlindContractChecklistBundleAndMapping(rawBundle);
+    const manualScores = completeContractChecklistManualScores(
+      blindBundle.samples.map((sample) => sample.sampleId)
+    );
+    const summary = createContractChecklistEvaluationSummary({
+      rawBundle,
+      blindBundle,
+      mappingFile,
+      manualScores
+    });
+    const latencyAndUsage = aggregateContractChecklistLatencyAndUsage(rawBundle);
+
+    expect(rawBundle.evaluationId).toBe("agent-phase-2-e-contract-target");
+    expect(rawBundle.runMatrix).toEqual({
+      totalRuns: 16,
+      baselineRuns: 8,
+      checklistRuns: 8
+    });
+    expect(() => assertContractChecklistEvaluationBundleIsScorable(rawBundle)).not.toThrow();
+    expect(() => assertBlindBundleHasNoModeLeak(blindBundle)).not.toThrow();
+    expect(validateContractChecklistManualScores(manualScores, blindBundle)).toEqual(
+      manualScores
+    );
+    expect(summary.evaluationId).toBe("agent-phase-2-e-contract-target");
+    expect(summary.quality.modeSummary.baseline.mean).toBeGreaterThan(0);
+    expect(summary.quality.modeSummary.checklist.mean).toBeGreaterThan(0);
+    expect(
+      summary.quality.pairedWinTieLoss.checklistWins +
+        summary.quality.pairedWinTieLoss.baselineWins +
+        summary.quality.pairedWinTieLoss.ties
+    ).toBe(8);
+    expect(latencyAndUsage.baseline.inputTokens.mean).toBe(100);
+    expect(latencyAndUsage.checklist.inputTokens.mean).toBe(120);
+  });
+
+  it("exports and imports Phase 2-E context-isolated blind packages", async () => {
+    const rawBundle = await createContractChecklistStubBundle();
+    const { blindBundle } =
+      createBlindContractChecklistBundleAndMapping(rawBundle);
+    const packageDirectory = await mkdtemp(
+      path.join(os.tmpdir(), "agent-blind-package-")
+    );
+
+    try {
+      const exported = await exportAgentBlindEvaluationPackage({
+        phase: "phase_2_e",
+        outputDirectory: packageDirectory,
+        blindBundle
+      });
+      const exportedBlindBundle = JSON.parse(
+        await readFile(
+          path.join(packageDirectory, "input", "blind_bundle.json"),
+          "utf8"
+        )
+      );
+      const serializedPackageInputs = JSON.stringify(exportedBlindBundle);
+      const scoreFilePath = path.join(
+        packageDirectory,
+        "output",
+        "manual_scores.json"
+      );
+      const manualScores = completeContractChecklistManualScores(
+        blindBundle.samples.map((sample) => sample.sampleId),
+        "context-isolated-blind-llm"
+      );
+      await writeFile(scoreFilePath, JSON.stringify(manualScores, null, 2), "utf8");
+
+      const imported = await importAgentBlindEvaluationScores({
+        phase: "phase_2_e",
+        scoreFilePath,
+        outputPath: path.join(packageDirectory, "imported_scores.json"),
+        blindBundle
+      });
+      const importedScores = contractChecklistManualScoresFileSchema.parse(
+        JSON.parse(await readFile(imported.outputPath, "utf8"))
+      );
+
+      expect(exported).toEqual({
+        outputDirectory: packageDirectory,
+        evaluationId: "agent-phase-2-e-contract-target",
+        sampleCount: 16
+      });
+      expect(imported).toEqual({
+        outputPath: path.join(packageDirectory, "imported_scores.json"),
+        evaluationId: "agent-phase-2-e-contract-target",
+        scoreCount: 16
+      });
+      expect(importedScores.scoringMethod).toBe("context-isolated-blind-llm");
+      expect(serializedPackageInputs).not.toContain("contractChecklistText");
+      expect(serializedPackageInputs).not.toContain("OPENAI_API_KEY");
+    } finally {
+      await rm(packageDirectory, { recursive: true, force: true });
+    }
   });
 });
 
