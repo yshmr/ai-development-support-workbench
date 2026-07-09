@@ -353,6 +353,7 @@ Phase 2-Eでは、low-risk detail-dense専用target datasetと、single-pass bas
 
 詳細:
 
+- [AI Agent Phase 2-A to 2-E decision summary](docs/agent_poc/phase_2_a_to_e_decision_summary.md)
 - [AI Agent Phase 2-A adaptive routing design](docs/agent_poc/phase_2_a_adaptive_agent_routing.md)
 - [AI Agent Phase 2-A adaptive routing evaluation results](docs/agent_poc/phase_2_a_adaptive_agent_routing_evaluation_results.md)
 - [AI Agent Phase 2-B routing policy refinement](docs/agent_poc/phase_2_b_routing_policy_refinement.md)
