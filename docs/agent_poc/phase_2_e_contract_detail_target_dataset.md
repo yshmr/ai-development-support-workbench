@@ -109,6 +109,91 @@ The evaluation compares:
 
 It does not change `/api/generate`, routing defaults, or prior routing results.
 
+## Formal Evaluation Result
+
+Execution environment:
+
+- local PowerShell / local Qdrant / configured `.env.local`
+- evaluationId: `agent-phase-2-e-contract-target`
+- scoringMethod: `context-isolated-blind-llm`
+- sample count: 16
+- failed runs: 0
+
+Quality:
+
+| Mode | Seven-axis mean | Median |
+|---|---:|---:|
+| Baseline single-pass | 4.839 | 4.929 |
+| Checklist single-pass | 4.857 | 4.857 |
+
+Paired comparison:
+
+| Checklist wins | Baseline wins | Ties |
+|---:|---:|---:|
+| 2 | 4 | 2 |
+
+Axis-level deltas:
+
+| Axis | Baseline | Checklist | Delta |
+|---|---:|---:|---:|
+| productSpecificRuleCoverage | 5.000 | 5.000 | 0.000 |
+| unsupportedAssumptionControl | 4.250 | 4.250 | 0.000 |
+| acceptanceCriteriaSpecificity | 4.875 | 4.750 | -0.125 |
+| jiraDecompositionAppropriateness | 5.000 | 5.000 | 0.000 |
+| jsonStructureStability | 5.000 | 5.000 | 0.000 |
+| crossFieldConsistency | 4.875 | 5.000 | +0.125 |
+| requirementToTaskTraceability | 4.875 | 5.000 | +0.125 |
+
+Latency and usage:
+
+| Mode | Mean elapsed ms | Median elapsed ms | Mean input tokens | Mean output tokens | Mean total tokens |
+|---|---:|---:|---:|---:|---:|
+| Baseline single-pass | 7333.375 | 6904 | 979.250 | 1076.375 | 2055.625 |
+| Checklist single-pass | 7379.875 | 7202 | 1240.500 | 1153.750 | 2394.250 |
+
+Ratios:
+
+| Metric | Checklist / baseline |
+|---|---:|
+| elapsed ratio | 1.006 |
+| total token ratio | 1.165 |
+
+## Result Interpretation
+
+Conclusion Category: **B. Partial improvement with cost trade-off**
+
+Phase 2-E showed a small mean quality lift for checklist single-pass generation
+on the targeted low-risk contract-detail dataset:
+
+- seven-axis mean improved from 4.839 to 4.857
+- cross-field consistency improved by +0.125
+- requirement-to-task traceability improved by +0.125
+
+However, the result is not strong enough to make checklist prompting the default
+path:
+
+- paired comparison favored baseline in four pairs, checklist in two, with two
+  ties
+- acceptance criteria specificity decreased by -0.125
+- total token usage increased by about 16.5%
+- elapsed time was effectively flat but slightly higher for checklist
+
+Practical conclusion for this PoC phase:
+
+- keep the deterministic checklist bridge as an optional candidate for
+  contract-detail support
+- do not default all low-risk detail-dense requests to checklist prompting from
+  this result alone
+- preserve the target dataset and evaluation harness for future prompt/checklist
+  calibration
+- investigate why checklist guidance improved consistency and traceability but
+  did not consistently win pairwise
+
+This result applies only to the eight-case Phase 2-E target dataset, current
+prompt/schema, current provider/runtime environment, and context-isolated blind
+scoring setup. It should not be generalized to all providers, all product
+requirements, or all Agent workflows.
+
 ## Non-Goals
 
 Phase 2-E target dataset preparation does not:
