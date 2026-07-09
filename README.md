@@ -351,6 +351,8 @@ Phase 2-D formal evaluationでは、Routed v3 + checklist bridgeはAlways OFFと
 
 Phase 2-Eでは、low-risk detail-dense専用target datasetと、single-pass baseline / checklistを比較するprovider-backed評価harnessを追加しました。`npm run agent:routing:contract:target-calibrate`は外部APIを呼ばず、8件すべてが`single_pass`かつ`lightweightChecklistRecommended=true`になることを確認します。実評価では、Checklist single-passがseven-axis mean 4.857、Baseline single-passが4.839となり、consistency / traceabilityは改善しました。一方でpaired比較はChecklist wins 2 / Baseline wins 4 / ties 2、total token ratio 1.165だったため、default化はせず、contract-detail supportのoptional candidateとして維持します。
 
+Phase 2-A〜Eの結論として、defaultは`grounded single-pass generation`のまま維持します。Agent workflow、routed mode、checklist promptingはいずれもdefault化せず、Phase 2は「selective orchestrationを評価し、negative / partial resultを残したうえで、過剰なdefault変更を避けた」探索セグメントとして閉じます。次は追加実装ではなく、portfolio presentationと説明整理を優先します。
+
 詳細:
 
 - [AI Agent Phase 2-A to 2-E decision summary](docs/agent_poc/phase_2_a_to_e_decision_summary.md)

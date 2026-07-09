@@ -7,6 +7,21 @@ and defines what should be decided before any Phase 2-F implementation starts.
 
 It does not introduce a new implementation task.
 
+## Selected Direction
+
+Selected option: **Option D. Stop Phase 2 implementation and move to portfolio
+readiness**
+
+Reason:
+
+```text
+Phase 2 already demonstrates implementation, evaluation, negative result
+preservation, failure-domain analysis, targeted follow-up, and a restrained
+default-policy decision.
+```
+
+Phase 2-F should not start unless a new explicit hypothesis is selected later.
+
 ## What Phase 2 Established
 
 Phase 2 tested whether bounded Agent workflow should become selectively applied
@@ -163,14 +178,15 @@ Risk:
 Recommended next action:
 
 ```text
-Choose between Option A and Option D before writing more code.
+Stop Phase 2 implementation and prepare the project for portfolio presentation.
 ```
 
-Option A is the best technical continuation if the project should keep exploring
-contract-detail quality improvement.
+This means:
 
-Option D is the best portfolio continuation if the current goal is to present
-the PoC as an evidence-driven engineering study.
+- keep the default policy unchanged
+- avoid adding another routing/checklist implementation phase for now
+- use Phase 2-A to 2-E as evidence of disciplined engineering judgment
+- focus on README, portfolio summary, and interview-ready explanation
 
-In either case, Phase 2-F should not start until the next hypothesis is selected
-explicitly.
+Option A remains a future technical continuation candidate, but it is not the
+current workstream.

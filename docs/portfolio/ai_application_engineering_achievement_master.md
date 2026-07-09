@@ -390,6 +390,24 @@ Learning:
 - routingは「Agentを呼べること」ではなく「呼ばない判断ができること」を評価しなければならない。
 - negative resultもportfolio上の重要なengineering evidenceである。
 
+Phase 2-B〜2-Eでは、このnegative resultを受けて段階的に仮説修正した。
+
+| Phase | Focus | Result | Decision |
+|---|---|---|---|
+| 2-B | `agent-routing-v2-candidate`でAgent回避を改善 | routed modeは`single_pass` 4件 / `agent_workflow` 4件になり、Always ONより低cost。ただしAlways OFFのqualityは上回らず。 | cost-aware candidateとして維持、default化しない。 |
+| 2-C | low-risk detail-dense failure向けのcontract-detail detector / checklist bridge | local-only routing/checklist spikeとして成立。外部APIを呼ばずに検証。 | provider-backed validationへ進める。 |
+| 2-D | routed v3 + checklist bridgeの正式評価 | Routed v3はAlways OFFと同じseven-axis mean 4.768、Always ONより低cost。ただしchecklist対象は1件のみ。 | bridgeは技術的に成立、target datasetが必要。 |
+| 2-E | low-risk contract-detail target datasetでbaseline/checklist比較 | Checklist mean 4.857 vs baseline 4.839。consistency / traceabilityは改善したが、pairedでは2勝4敗2分、token ratio 1.165。 | checklistはoptional candidateとして維持、default化しない。 |
+
+Phase 2 final decision:
+
+- defaultは`grounded single-pass generation`のまま維持する。
+- Always ON Agent workflow、routed mode、checklist promptingはいずれもdefault化しない。
+- deterministic routing、contract-detail checklist、context-isolated blind evaluation workflowはcandidate / evaluation assetとして残す。
+- Phase 2は「selective orchestrationを評価し、negative / partial resultを根拠にdefault変更を抑制した」探索セグメントとして閉じる。
+
+この判断は、単に機能を追加し続けるのではなく、quality / cost / failure-domain evidenceに基づいて実装を止める判断を含んでいる点が重要である。
+
 ## 11. Failure-Domain and Evaluation Discipline
 
 RAG failure-domain:
